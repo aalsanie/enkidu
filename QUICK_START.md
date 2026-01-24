@@ -1,4 +1,4 @@
-# Enkido Linkage Doctor — Quick Start
+# Enkidu Linkage Doctor — Quick Start
 
 ---
 
@@ -41,13 +41,13 @@ Examples:
 Validate a compiled classes directory:
 
 ```bash
-enkido doctor   --targets build/classes/kotlin/main   --classpath classpath.txt   --out build/enkido   --format json   --fail-on error
+Enkidu doctor   --targets build/classes/kotlin/main   --classpath classpath.txt   --out build/Enkidu   --format json   --fail-on error
 ```
 
 Validate a jar:
 
 ```bash
-enkido doctor   --targets app/build/libs/app.jar   --classpath classpath.txt   --out build/enkido   --format json,sarif,html   --fail-on error
+Enkidu doctor   --targets app/build/libs/app.jar   --classpath classpath.txt   --out build/Enkidu   --format json,sarif,html   --fail-on error
 ```
 
 ---
@@ -62,13 +62,13 @@ enkido doctor   --targets app/build/libs/app.jar   --classpath classpath.txt   -
 
 ## Outputs
 
-Enkido can produce exports suitable for humans and CI systems:
+Enkidu can produce exports suitable for humans and CI systems:
 
 - **JSON**: canonical, deterministic machine-readable output
 - **SARIF**: CI annotations and PR checks
 - **HTML**: shareable report for investigation and collaboration
 
-Even if you only care about “CI fail” or the IntelliJ UI, Enkido benefits from a stable report model so results are reproducible and diffable.
+Even if you only care about “CI fail” or the IntelliJ UI, Enkidu benefits from a stable report model so results are reproducible and diffable.
 
 ---
 
@@ -86,27 +86,27 @@ The IntelliJ plugin is the fast feedback loop:
 
 ## Gradle usage (verification gate, CLI-driven)
 
-The most valuable workflow is failing CI *before* a runtime crash. Wire Enkido as a verification step by generating `classpath.txt` from your build tooling and passing it to the CLI.
+The most valuable workflow is failing CI *before* a runtime crash. Wire Enkidu as a verification step by generating `classpath.txt` from your build tooling and passing it to the CLI.
 
 A minimal wiring pattern (invoking the CLI) looks like this:
 
 ```kotlin
 // build.gradle.kts (wiring pattern)
-// The exact way you invoke `enkido doctor` depends on how you consume the CLI artifact in your build.
+// The exact way you invoke `Enkidu doctor` depends on how you consume the CLI artifact in your build.
 
-tasks.register("enkidoDoctor") {
+tasks.register("EnkiduDoctor") {
   group = "verification"
   description = "Fails if runtime linkage will break on the shipped classpath."
   dependsOn("classes")
 
   doLast {
     // 1) Write the runtime classpath (ordered) to classpath.txt.
-    // 2) Invoke Enkido with:
-    //    enkido doctor --targets ... --classpath classpath.txt --out ... --format ... --fail-on error
+    // 2) Invoke Enkidu with:
+    //    Enkidu doctor --targets ... --classpath classpath.txt --out ... --format ... --fail-on error
   }
 }
 
 tasks.named("check") {
-  dependsOn("enkidoDoctor")
+  dependsOn("EnkiduDoctor")
 }
 ```

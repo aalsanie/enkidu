@@ -1,6 +1,6 @@
-# Enkido (Linkage Doctor)
+# Enkidu (Linkage Doctor)
 
-Enkido Linkage Doctor checks whether the code you compiled will still work at runtime by reading your compiled bytecode and resolving every referenced class, method, and field against the exact jars on your runtime classpath. It then tells you what will fail, where it will fail (down to the call site), which jar/version caused it (or which jar is missing / being shadowed), and what change is most likely to fix it.
+Enkidu Linkage Doctor checks whether the code you compiled will still work at runtime by reading your compiled bytecode and resolving every referenced class, method, and field against the exact jars on your runtime classpath. It then tells you what will fail, where it will fail (down to the call site), which jar/version caused it (or which jar is missing / being shadowed), and what change is most likely to fix it.
 
 Given your compiled classes (or jar) and the runtime classpath you plan to ship, it simulates JVM linkage for those bytecode references and reports what will fail, where (call site), why (missing/mismatched symbols or types), which jar “wins” vs which is shadowed, and a concrete fix plan (upgrade/align versions, exclude conflicts, remove duplicates, fix shading/SPI).
 
@@ -8,7 +8,7 @@ Given your compiled classes (or jar) and the runtime classpath you plan to ship,
 
 ## What it does
 
-Enkido simulates JVM linkage on your *real* runtime classpath and flags failures you typically only discover late; often after merge, after deploy, or only in prod-like environments.
+Enkidu simulates JVM linkage on your *real* runtime classpath and flags failures you typically only discover late; often after merge, after deploy, or only in prod-like environments.
 
 ---
 
@@ -56,6 +56,11 @@ It offers actionability:
 
 ---
 
+## Quick start
+see [quick start](./QUICK_START.md)
+
+---
+
 ## Changelog
 [changelog](./CHANGELOG.md)
 
@@ -63,4 +68,4 @@ It offers actionability:
 
 ## License
 
-Apache-2.0
+[Apache-2.0](./LICENSE)
