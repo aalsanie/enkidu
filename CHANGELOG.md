@@ -12,6 +12,7 @@
 - Reports are readable and actionable
 - Added fixture-based resolver tests
 - For a set of fixtures, suggested fix resolves the issue
+- CLI integration tests run against fixtures
 
 ### Fixed
 - Bytecode type-reference recording to use consistent internal names and correct parameter

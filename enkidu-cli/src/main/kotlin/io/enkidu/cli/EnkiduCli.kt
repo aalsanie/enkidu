@@ -22,5 +22,32 @@
  */
 package io.enkidu.cli
 
-/** Placeholder for Milestone A wiring. */
-internal object Dummy
+import picocli.CommandLine
+import kotlin.system.exitProcess
+
+/**
+ * Enkidu CLI entrypoint.
+ */
+object EnkiduCli {
+    @JvmStatic
+    fun main(args: Array<String>) {
+        val exitCode = commandLine().execute(*args)
+        exitProcess(exitCode)
+    }
+
+    internal fun commandLine(): CommandLine =
+        CommandLine(RootCommand())
+            .setCaseInsensitiveEnumValuesAllowed(true)
+}
+
+@CommandLine.Command(
+    name = "enkidu",
+    mixinStandardHelpOptions = true,
+    subcommands = [DoctorCommand::class],
+    description = ["Enkidu Linkage Doctor — predict runtime linkage failures against an explicit runtime classpath."],
+)
+internal class RootCommand : Runnable {
+    override fun run() {
+        // picocli will show usage via -h/--help. Default command does nothing.
+    }
+}
