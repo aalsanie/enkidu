@@ -1,9 +1,26 @@
-rootProject.name = "enkidu-linkage-doctor"
+pluginManagement {
+  repositories {
+    gradlePluginPortal()
+    mavenCentral()
+  }
+}
+
+plugins {
+  id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+
+dependencyResolutionManagement {
+  repositories {
+    mavenCentral()
+  }
+}
+
+rootProject.name = "enkidu"
 
 include(
-  "enkidu-artifacts",
-  "enkidu-core",
-  "enkidu-export",
-  "enkidu-cli",
-  "enkidu-intellij-plugin",
+  ":enkidu-artifacts",
+  ":enkidu-core",
+  ":enkidu-export",
+  ":enkidu-cli",
+  ":enkidu-intellij-plugin",
 )
