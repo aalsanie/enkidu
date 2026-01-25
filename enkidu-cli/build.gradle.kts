@@ -10,6 +10,7 @@ kotlin {
 dependencies {
     implementation(project(":enkidu-artifacts"))
     implementation(project(":enkidu-core"))
+    implementation(project(":enkidu-export"))
 
     implementation("info.picocli:picocli:4.7.6")
 

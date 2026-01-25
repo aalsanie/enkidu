@@ -23,7 +23,6 @@
 package io.enkidu.cli
 
 import io.enkidu.artifacts.v1.EnkiduFingerprints
-import io.enkidu.artifacts.v1.EnkiduJson
 import io.enkidu.artifacts.v1.Fingerprint
 import io.enkidu.artifacts.v1.Fingerprints
 import io.enkidu.artifacts.v1.LinkageReport
@@ -36,6 +35,7 @@ import io.enkidu.core.model.ClasspathSnapshot
 import io.enkidu.core.resolve.JvmLinkageResolver
 import io.enkidu.core.scan.BytecodeReference
 import io.enkidu.core.scan.BytecodeReferenceScanner
+import io.enkidu.export.EnkiduReportWriters
 import picocli.CommandLine
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -136,8 +136,8 @@ internal class DoctorCommand : Callable<Int> {
 
             val bytes =
                 when (format) {
-                    OutputFormat.JSON -> EnkiduJson.prettyWriter.writeValueAsBytes(report)
-                    OutputFormat.SARIF -> SarifWriterV1.write(report)
+                    OutputFormat.JSON -> EnkiduReportWriters.json(report)
+                    OutputFormat.SARIF -> EnkiduReportWriters.sarifV1(report)
                     OutputFormat.HTML -> HtmlWriterV1.write(report)
                 }
 
@@ -309,69 +309,6 @@ internal enum class FailOnPolicy {
 
 internal object BuildInfo {
     val version: String = DoctorCommand::class.java.`package`?.implementationVersion ?: "dev"
-}
-
-internal object SarifWriterV1 {
-    fun write(report: LinkageReport): ByteArray {
-        val sarif =
-            mapOf(
-                "version" to "2.1.0",
-                "${'$'}schema" to "https://json.schemastore.org/sarif-2.1.0.json",
-                "runs" to
-                    listOf(
-                        mapOf(
-                            "tool" to
-                                mapOf(
-                                    "driver" to
-                                        mapOf(
-                                            "name" to report.tool.name,
-                                            "version" to report.tool.version,
-                                            "rules" to
-                                                report.failures
-                                                    .map { it.type.name }
-                                                    .distinct()
-                                                    .sorted()
-                                                    .map {
-                                                        mapOf(
-                                                            "id" to it,
-                                                            "name" to it,
-                                                        )
-                                                    },
-                                        ),
-                                ),
-                            "results" to
-                                report.failures.map { failure ->
-                                    mapOf(
-                                        "ruleId" to failure.type.name,
-                                        "level" to sarifLevel(failure.severity),
-                                        "message" to mapOf("text" to failure.message),
-                                        "locations" to
-                                            listOf(
-                                                mapOf(
-                                                    "logicalLocations" to
-                                                        listOf(
-                                                            mapOf(
-                                                                "fullyQualifiedName" to
-                                                                    "${failure.referenceSite.callerClass}.${failure.referenceSite.callerMethod}${failure.referenceSite.callerDescriptor}",
-                                                            ),
-                                                        ),
-                                                ),
-                                            ),
-                                    )
-                                },
-                        ),
-                    ),
-            )
-
-        return EnkiduJson.prettyWriter.writeValueAsBytes(sarif)
-    }
-
-    private fun sarifLevel(severity: Severity): String =
-        when (severity) {
-            Severity.ERROR -> "error"
-            Severity.WARN -> "warning"
-            Severity.INFO -> "note"
-        }
 }
 
 internal object HtmlWriterV1 {
