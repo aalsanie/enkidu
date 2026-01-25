@@ -24,10 +24,12 @@ package io.enkidu.core.engine
 
 import io.enkidu.artifacts.v1.Evidence
 import io.enkidu.artifacts.v1.FailureType
+import io.enkidu.artifacts.v1.FixPlanItem
 import io.enkidu.artifacts.v1.LinkageFailure
 import io.enkidu.artifacts.v1.Severity
 import io.enkidu.artifacts.v1.SymbolId
 import io.enkidu.artifacts.v1.SymbolKind
+import io.enkidu.core.fixplan.FixPlannerV1
 import io.enkidu.core.model.ClasspathSnapshot
 import io.enkidu.core.model.JarIndex
 import io.enkidu.core.resolve.ClassResolutionOutcome
@@ -48,6 +50,7 @@ class LinkageFailureClassifier(
     private val snapshot: ClasspathSnapshot,
 ) {
     private val jarIndex: JarIndex = JarIndex.build(snapshot)
+    private val fixPlanner: FixPlannerV1 = FixPlannerV1()
 
     fun classify(
         reference: BytecodeReference,
@@ -132,8 +135,8 @@ class LinkageFailureClassifier(
                     severity = Severity.ERROR,
                     message =
                         "Incompatible class change for " +
-                            "${outcome.symbolOwner}.${outcome.signature.name}" +
-                            "${outcome.signature.descriptor}: ${outcome.message}",
+                            "${outcome.symbolOwner}." +
+                            "${outcome.signature.name}${outcome.signature.descriptor}: ${outcome.message}",
                     symbol = reference.symbol,
                     reference = reference,
                     evidence = evidenceForOwner(outcome.symbolOwner),
@@ -186,9 +189,9 @@ class LinkageFailureClassifier(
                     type = FailureType.INCOMPATIBLE_CLASS_CHANGE,
                     severity = Severity.ERROR,
                     message =
-                        "Incompatible class change for ${outcome.symbolOwner}." +
-                            "${outcome.signature.name}:" +
-                            "${outcome.signature.descriptor}: ${outcome.message}",
+                        "Incompatible class change for " +
+                            "${outcome.symbolOwner}." +
+                            "${outcome.signature.name}:${outcome.signature.descriptor}: ${outcome.message}",
                     symbol = reference.symbol,
                     reference = reference,
                     evidence = evidenceForOwner(outcome.symbolOwner),
@@ -228,6 +231,8 @@ class LinkageFailureClassifier(
         callGraph: CallGraphIndex?,
     ): LinkageFailure {
         val enriched = enrichWithCallChain(message, reference, callGraph)
+
+        val fixPlan: List<FixPlanItem> = fixPlanner.plan(type = type, symbol = symbol, evidence = evidence)
         return LinkageFailure(
             type = type,
             severity = severity,
@@ -235,7 +240,7 @@ class LinkageFailureClassifier(
             symbol = symbol,
             referenceSite = reference.site,
             evidence = evidence,
-            fixPlan = emptyList(),
+            fixPlan = fixPlan,
         )
     }
 

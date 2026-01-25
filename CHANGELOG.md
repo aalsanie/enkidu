@@ -10,8 +10,8 @@
 - Engine producing outcomes for missing symbols, class<>interface mismatches (ICCE) descriptor mismatches
 - Engine now detects static-vs-instance field access mismatches
 - Reports are readable and actionable
-
-Added fixture-based resolver tests covering: removed method, interface→class mismatch (invokeinterface ICCE), descriptor change, and field access ICCE.
+- Added fixture-based resolver tests
+- For a set of fixtures, suggested fix resolves the issue
 
 ### Fixed
 - Bytecode type-reference recording to use consistent internal names and correct parameter
