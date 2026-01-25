@@ -138,7 +138,7 @@ internal class DoctorCommand : Callable<Int> {
                 when (format) {
                     OutputFormat.JSON -> EnkiduReportWriters.json(report)
                     OutputFormat.SARIF -> EnkiduReportWriters.sarifV1(report)
-                    OutputFormat.HTML -> HtmlWriterV1.write(report)
+                    OutputFormat.HTML -> EnkiduReportWriters.htmlV1(report)
                 }
 
             writeOutput(bytes)
@@ -309,100 +309,4 @@ internal enum class FailOnPolicy {
 
 internal object BuildInfo {
     val version: String = DoctorCommand::class.java.`package`?.implementationVersion ?: "dev"
-}
-
-internal object HtmlWriterV1 {
-    fun write(report: LinkageReport): ByteArray {
-        val failures = report.failures
-        val sb = StringBuilder()
-        sb.append("<!doctype html>\n")
-        sb.append("<html lang=\"en\">\n")
-        sb.append("<head>\n")
-        sb.append("  <meta charset=\"utf-8\">\n")
-        sb.append("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
-        sb.append("  <title>Enkidu Linkage Doctor Report</title>\n")
-        sb.append(
-            "  <style>body{font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif;max-width:1000px;margin:24px auto;padding:0 16px;}pre{white-space:pre-wrap;}code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}</style>\n",
-        )
-        sb.append("</head>\n")
-        sb.append("<body>\n")
-        sb.append("  <h1>Enkidu Linkage Doctor</h1>\n")
-        sb.append("  <p><strong>Tool</strong>: ")
-        sb.append(escape(report.tool.name))
-        sb.append(" ")
-        sb.append(escape(report.tool.version))
-        sb.append("</p>\n")
-        sb.append("  <p><strong>Resolver mode</strong>: ")
-        sb.append(escape(report.tool.resolverMode))
-        sb.append("</p>\n")
-        sb.append("  <h2>Summary</h2>\n")
-        sb.append("  <p>Failures: ")
-        sb.append(report.summary.failureCount)
-        sb.append("</p>\n")
-
-        sb.append("  <h2>Failures</h2>\n")
-        if (failures.isEmpty()) {
-            sb.append("  <p>No failures.</p>\n")
-        } else {
-            for ((idx, f) in failures.withIndex()) {
-                sb.append("  <h3>")
-                sb.append(idx + 1)
-                sb.append(". ")
-                sb.append(escape(f.type.name))
-                sb.append(" (")
-                sb.append(escape(f.severity.name))
-                sb.append(")</h3>\n")
-                sb.append("  <pre>")
-                sb.append(escape(f.message))
-                sb.append("</pre>\n")
-                sb.append("  <p><strong>Callsite</strong>: <code>")
-                sb.append(escape(f.referenceSite.callerClass))
-                sb.append(".")
-                sb.append(escape(f.referenceSite.callerMethod))
-                sb.append(escape(f.referenceSite.callerDescriptor))
-                if (f.referenceSite.line != null) {
-                    sb.append(":")
-                    sb.append(f.referenceSite.line)
-                }
-                sb.append("</code></p>\n")
-
-                if (f.evidence != null) {
-                    sb.append("  <p><strong>Evidence</strong>: <code>")
-                    sb.append(escape(f.evidence!!.winnerJar ?: "<none>"))
-                    sb.append("</code></p>\n")
-                }
-
-                if (f.fixPlan.isNotEmpty()) {
-                    sb.append("  <p><strong>Fix plan</strong>:</p>\n")
-                    sb.append("  <ul>\n")
-                    for (item in f.fixPlan) {
-                        sb.append("    <li><code>")
-                        sb.append(escape(item.kind.name))
-                        sb.append("</code>: ")
-                        sb.append(escape(item.value))
-                        if (item.confidence != null) {
-                            sb.append(" (")
-                            sb.append(item.confidence)
-                            sb.append(")")
-                        }
-                        sb.append("</li>\n")
-                    }
-                    sb.append("  </ul>\n")
-                }
-            }
-        }
-
-        sb.append("</body>\n")
-        sb.append("</html>\n")
-
-        return sb.toString().toByteArray(StandardCharsets.UTF_8)
-    }
-
-    private fun escape(s: String): String =
-        s
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&#39;")
 }

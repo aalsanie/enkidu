@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Enkidu Linkage Doctor Report</title>
+  <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:1100px;margin:24px auto;padding:0 16px;line-height:1.45}h1{margin:0 0 8px 0}h2{margin:28px 0 8px 0;border-top:1px solid #e5e7eb;padding-top:18px}h3{margin:18px 0 6px 0}code{background:#f6f8fa;padding:2px 4px;border-radius:4px}pre{background:#f6f8fa;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-word}.meta{color:#374151}.k{color:#111827;font-weight:600}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;vertical-align:middle;background:#eef2ff}.badge.err{background:#fee2e2}.badge.warn{background:#fef3c7}.badge.info{background:#e0f2fe}table{border-collapse:collapse;width:100%;margin:10px 0}th,td{border:1px solid #e5e7eb;padding:8px;vertical-align:top}th{background:#f9fafb;text-align:left}ul{margin:6px 0 0 20px}a{color:inherit}</style>
+</head>
+<body>
+  <h1>Enkidu Linkage Doctor</h1>
+  <div class="meta">
+    <div><span class="k">Tool</span>: enkidu-linkage-doctor test</div>
+    <div><span class="k">Resolver mode</span>: jvm-linkage-sim-v1</div>
+    <div><span class="k">Classpath fingerprint</span>: <code>classpath-fp</code></div>
+    <div><span class="k">Targets fingerprint</span>: <code>targets-fp</code></div>
+  </div>
+  <h2>Summary</h2>
+  <p><span class="k">Failures</span>: 2</p>
+  <h3>By type</h3>
+  <table>
+    <thead><tr><th>Type</th><th>Count</th></tr></thead>
+    <tbody>
+      <tr><td><code>MISSING_CLASS</code></td><td>1</td></tr>
+      <tr><td><code>MISSING_METHOD</code></td><td>1</td></tr>
+    </tbody>
+  </table>
+  <h2>Failures</h2>
+  <h3><code>MISSING_CLASS</code> (1)</h3>
+  <div>
+    <p><span class="badge badge err">ERROR</span> <span class="k">1.</span></p>
+    <pre>NoClassDefFoundError: demo/Missing</pre>
+    <p><span class="k">Callsite</span>: <code>demo/App.main([Ljava/lang/String;)V:8 @18</code></p>
+    <p><span class="k">Symbol</span>: <code>demo/Missing TYPE demo/MissingLdemo/Missing;</code></p>
+    <p><span class="k">Evidence</span>:</p>
+    <ul>
+      <li><span class="k">Missing jar hint</span>: <code>cp/missing.jar</code></li>
+    </ul>
+    <p><span class="k">Fix plan</span>:</p>
+    <ul>
+      <li><code>ADD_MISSING_DEPENDENCY</code>: Add cp/missing.jar to the runtime classpath <span class="meta">(confidence 0.8)</span></li>
+    </ul>
+  </div>
+  <h3><code>MISSING_METHOD</code> (1)</h3>
+  <div>
+    <p><span class="badge badge err">ERROR</span> <span class="k">1.</span></p>
+    <pre>NoSuchMethodError: demo/Lib.doThing(Ljava/lang/String;)V</pre>
+    <p><span class="k">Callsite</span>: <code>demo/App.main([Ljava/lang/String;)V:7 @12</code></p>
+    <p><span class="k">Symbol</span>: <code>demo/Lib METHOD doThing(Ljava/lang/String;)V</code></p>
+    <p><span class="k">Evidence</span>:</p>
+    <ul>
+      <li><span class="k">Winner jar</span>: <code>cp/lib-1.0.jar</code></li>
+      <li><span class="k">Shadowed jars</span>: <code>cp/lib-0.9.jar</code></li>
+    </ul>
+    <p><span class="k">Fix plan</span>:</p>
+    <ul>
+      <li><code>ALIGN_VERSIONS</code>: Align lib to 1.0 across the runtime classpath <span class="meta">(confidence 0.9)</span></li>
+    </ul>
+  </div>
+</body>
+</html>

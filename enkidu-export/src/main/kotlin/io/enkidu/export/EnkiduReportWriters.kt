@@ -23,8 +23,12 @@
 package io.enkidu.export
 
 import io.enkidu.artifacts.v1.EnkiduJson
+import io.enkidu.artifacts.v1.FailureType
+import io.enkidu.artifacts.v1.FixPlanItem
+import io.enkidu.artifacts.v1.LinkageFailure
 import io.enkidu.artifacts.v1.LinkageReport
 import io.enkidu.artifacts.v1.Severity
+import java.nio.charset.StandardCharsets
 
 /**
  * Exporters are pure transformations: LinkageReport -> bytes.
@@ -36,6 +40,226 @@ object EnkiduReportWriters {
     fun json(report: LinkageReport): ByteArray = EnkiduJson.prettyWriter.writeValueAsBytes(report.canonical())
 
     fun sarifV1(report: LinkageReport): ByteArray = SarifWriterV1.write(report.canonical())
+
+    fun htmlV1(report: LinkageReport): ByteArray = HtmlWriterV1.write(report.canonical())
+}
+
+/**
+ * HTML report v1.
+ *
+ * Single-file output designed to be shareable.
+ *
+ * Determinism rules:
+ * - No timestamps.
+ * - No random IDs.
+ * - Stable ordering follows [LinkageReport.canonical].
+ * - No trailing newline at EOF (snapshot stability across platforms/editors).
+ */
+internal object HtmlWriterV1 {
+    fun write(report: LinkageReport): ByteArray {
+        val sb = StringBuilder(16_384)
+        val failures = report.failures
+
+        sb.append("<!doctype html>\n")
+        sb.append("<html lang=\"en\">\n")
+        sb.append("<head>\n")
+        sb.append("  <meta charset=\"utf-8\">\n")
+        sb.append("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
+        sb.append("  <title>Enkidu Linkage Doctor Report</title>\n")
+        sb.append("  <style>")
+        sb.append(
+            "body{font-family:system-ui,-apple-system," +
+                "Segoe UI,Roboto,sans-serif;max-width:1100px;margin:24px auto;padding:0 16px;line-height:1.45}" +
+                "h1{margin:0 0 8px 0}" +
+                "h2{margin:28px 0 8px 0;border-top:1px solid #e5e7eb;padding-top:18px}" +
+                "h3{margin:18px 0 6px 0}" +
+                "code{background:#f6f8fa;padding:2px 4px;border-radius:4px}" +
+                "pre{background:#f6f8fa;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-word}" +
+                ".meta{color:#374151}" +
+                ".k{color:#111827;font-weight:600}" +
+                ".badge{display:inline-block;padding:2px 8px;border-radius:999px;" +
+                "font-size:12px;vertical-align:middle;background:#eef2ff}" +
+                ".badge.err{background:#fee2e2}" +
+                ".badge.warn{background:#fef3c7}" +
+                ".badge.info{background:#e0f2fe}" +
+                "table{border-collapse:collapse;width:100%;margin:10px 0}" +
+                "th,td{border:1px solid #e5e7eb;padding:8px;vertical-align:top}" +
+                "th{background:#f9fafb;text-align:left}" +
+                "ul{margin:6px 0 0 20px}" +
+                "a{color:inherit}",
+        )
+        sb.append("</style>\n")
+        sb.append("</head>\n")
+        sb.append("<body>\n")
+
+        sb.append("  <h1>Enkidu Linkage Doctor</h1>\n")
+        sb.append("  <div class=\"meta\">\n")
+        sb.append("    <div><span class=\"k\">Tool</span>: ")
+        sb.append(HtmlEscaper.escape(report.tool.name))
+        sb.append(" ")
+        sb.append(HtmlEscaper.escape(report.tool.version))
+        sb.append("</div>\n")
+        sb.append("    <div><span class=\"k\">Resolver mode</span>: ")
+        sb.append(HtmlEscaper.escape(report.tool.resolverMode))
+        sb.append("</div>\n")
+        sb.append("    <div><span class=\"k\">Classpath fingerprint</span>: <code>")
+        sb.append(HtmlEscaper.escape(report.fingerprints.classpath.value))
+        sb.append("</code></div>\n")
+        sb.append("    <div><span class=\"k\">Targets fingerprint</span>: <code>")
+        sb.append(HtmlEscaper.escape(report.fingerprints.targets.value))
+        sb.append("</code></div>\n")
+        sb.append("  </div>\n")
+
+        sb.append("  <h2>Summary</h2>\n")
+        sb.append("  <p><span class=\"k\">Failures</span>: ")
+        sb.append(report.summary.failureCount)
+        sb.append("</p>\n")
+
+        sb.append("  <h3>By type</h3>\n")
+        if (report.summary.failureCountByType.isEmpty()) {
+            sb.append("  <p>No failures.</p>\n")
+        } else {
+            sb.append("  <table>\n")
+            sb.append("    <thead><tr><th>Type</th><th>Count</th></tr></thead>\n")
+            sb.append("    <tbody>\n")
+            for ((type, count) in report.summary.failureCountByType.entries) {
+                sb.append("      <tr><td><code>")
+                sb.append(HtmlEscaper.escape(type.name))
+                sb.append("</code></td><td>")
+                sb.append(count)
+                sb.append("</td></tr>\n")
+            }
+            sb.append("    </tbody>\n")
+            sb.append("  </table>\n")
+        }
+
+        sb.append("  <h2>Failures</h2>\n")
+        if (failures.isEmpty()) {
+            sb.append("  <p>No failures.</p>\n")
+            sb.append("</body>\n</html>")
+            return sb.toString().toByteArray(StandardCharsets.UTF_8)
+        }
+
+        // Group by failure type while preserving canonical ordering.
+        val groups = LinkedHashMap<FailureType, MutableList<LinkageFailure>>()
+        for (f in failures) {
+            groups.computeIfAbsent(f.type) { mutableListOf() }.add(f)
+        }
+
+        for ((type, list) in groups) {
+            sb.append("  <h3><code>")
+            sb.append(HtmlEscaper.escape(type.name))
+            sb.append("</code> (")
+            sb.append(list.size)
+            sb.append(")</h3>\n")
+
+            for ((idx, f) in list.withIndex()) {
+                sb.append("  <div>\n")
+                sb.append("    <p><span class=\"badge ")
+                sb.append(badgeClass(f.severity))
+                sb.append("\">")
+                sb.append(HtmlEscaper.escape(f.severity.name))
+                sb.append("</span> ")
+                sb.append("<span class=\"k\">")
+                sb.append(idx + 1)
+                sb.append(".</span></p>\n")
+
+                sb.append("    <pre>")
+                sb.append(HtmlEscaper.escape(f.message))
+                sb.append("</pre>\n")
+
+                sb.append("    <p><span class=\"k\">Callsite</span>: <code>")
+                sb.append(HtmlEscaper.escape(f.referenceSite.callerClass))
+                sb.append(".")
+                sb.append(HtmlEscaper.escape(f.referenceSite.callerMethod))
+                sb.append(HtmlEscaper.escape(f.referenceSite.callerDescriptor))
+                if (f.referenceSite.line != null) {
+                    sb.append(":")
+                    sb.append(f.referenceSite.line)
+                }
+                if (f.referenceSite.bytecodeOffset != null) {
+                    sb.append(" @")
+                    sb.append(f.referenceSite.bytecodeOffset)
+                }
+                sb.append("</code></p>\n")
+
+                if (f.symbol != null) {
+                    sb.append("    <p><span class=\"k\">Symbol</span>: <code>")
+                    sb.append(HtmlEscaper.escape(f.symbol!!.owner))
+                    sb.append(" ")
+                    sb.append(HtmlEscaper.escape(f.symbol!!.kind.name))
+                    sb.append(" ")
+                    sb.append(HtmlEscaper.escape(f.symbol!!.name))
+                    sb.append(HtmlEscaper.escape(f.symbol!!.descriptor))
+                    sb.append("</code></p>\n")
+                }
+
+                if (f.evidence != null) {
+                    sb.append(renderEvidence(f.evidence!!))
+                }
+
+                if (f.fixPlan.isNotEmpty()) {
+                    sb.append(renderFixPlan(f.fixPlan))
+                }
+
+                sb.append("  </div>\n")
+            }
+        }
+
+        sb.append("</body>\n")
+        sb.append("</html>")
+        return sb.toString().toByteArray(StandardCharsets.UTF_8)
+    }
+
+    private fun badgeClass(severity: Severity): String =
+        when (severity) {
+            Severity.ERROR -> "badge err"
+            Severity.WARN -> "badge warn"
+            Severity.INFO -> "badge info"
+        }
+
+    private fun renderEvidence(e: io.enkidu.artifacts.v1.Evidence): String {
+        val sb = StringBuilder(256)
+        sb.append("    <p><span class=\"k\">Evidence</span>:</p>\n")
+        sb.append("    <ul>\n")
+        if (e.winnerJar != null) {
+            sb.append("      <li><span class=\"k\">Winner jar</span>: <code>")
+            sb.append(HtmlEscaper.escape(e.winnerJar!!))
+            sb.append("</code></li>\n")
+        }
+        if (e.shadowedJars.isNotEmpty()) {
+            sb.append("      <li><span class=\"k\">Shadowed jars</span>: <code>")
+            sb.append(HtmlEscaper.escape(e.shadowedJars.joinToString(" | ")))
+            sb.append("</code></li>\n")
+        }
+        if (e.missingJarHint != null) {
+            sb.append("      <li><span class=\"k\">Missing jar hint</span>: <code>")
+            sb.append(HtmlEscaper.escape(e.missingJarHint!!))
+            sb.append("</code></li>\n")
+        }
+        sb.append("    </ul>\n")
+        return sb.toString()
+    }
+
+    private fun renderFixPlan(items: List<FixPlanItem>): String {
+        val sb = StringBuilder(256)
+        sb.append("    <p><span class=\"k\">Fix plan</span>:</p>\n")
+        sb.append("    <ul>\n")
+        for (i in items) {
+            sb.append("      <li><code>")
+            sb.append(HtmlEscaper.escape(i.kind.name))
+            sb.append("</code>: ")
+            sb.append(HtmlEscaper.escape(i.value))
+            if (i.confidence != null) {
+                sb.append(" <span class=\"meta\">(confidence ")
+                sb.append(i.confidence)
+                sb.append(")</span>")
+            }
+            sb.append("</li>\n")
+        }
+        sb.append("    </ul>\n")
+        return sb.toString()
+    }
 }
 
 /**
