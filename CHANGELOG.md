@@ -9,6 +9,7 @@
 - JVM resolution engine resolves referenced classes / methods / fields via hierarchy + interface walks
 - Engine producing outcomes for missing symbols, class<>interface mismatches (ICCE) descriptor mismatches
 - Engine now detects static-vs-instance field access mismatches
+- Reports are readable and actionable
 
 Added fixture-based resolver tests covering: removed method, interface→class mismatch (invokeinterface ICCE), descriptor change, and field access ICCE.
 
