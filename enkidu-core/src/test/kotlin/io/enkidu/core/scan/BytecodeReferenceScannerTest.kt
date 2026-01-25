@@ -89,33 +89,50 @@ class BytecodeReferenceScannerTest {
         val callerClass = outDir.resolve("demo/Caller.class")
         val refs = BytecodeReferenceScanner().scanClassBytes(callerClass.readBytes())
 
+        // Scanner emits JVM internal names (slashes), not dotted binary names.
+        val targetInternal = "demo/Target"
+
         // Core expectations (exact JVM descriptors)
-        // Note: SymbolId.owner is an internal JVM name (slashes), e.g. "demo/Target".
         assertContains(
             refs.map { it.symbol }.toSet(),
-            SymbolId("demo/Target", SymbolKind.FIELD, "staticField", "I"),
+            SymbolId(owner = targetInternal, kind = SymbolKind.FIELD, name = "staticField", descriptor = "I"),
         )
         assertContains(
             refs.map { it.symbol }.toSet(),
-            SymbolId("demo/Target", SymbolKind.FIELD, "value", "I"),
+            SymbolId(owner = targetInternal, kind = SymbolKind.FIELD, name = "value", descriptor = "I"),
         )
         assertContains(
             refs.map { it.symbol }.toSet(),
-            SymbolId("demo/Target", SymbolKind.METHOD, "stat", "(Ljava/lang/String;)Ljava/lang/String;"),
+            SymbolId(
+                owner = targetInternal,
+                kind = SymbolKind.METHOD,
+                name = "stat",
+                descriptor = "(Ljava/lang/String;)Ljava/lang/String;",
+            ),
         )
         assertContains(
             refs.map { it.symbol }.toSet(),
-            SymbolId("demo/Target", SymbolKind.METHOD, "hello", "(Ljava/lang/String;)Ljava/lang/String;"),
+            SymbolId(
+                owner = targetInternal,
+                kind = SymbolKind.METHOD,
+                name = "hello",
+                descriptor = "(Ljava/lang/String;)Ljava/lang/String;",
+            ),
         )
         assertContains(
             refs.map { it.symbol }.toSet(),
-            SymbolId("demo/Target", SymbolKind.METHOD, "<init>", "()V"),
+            SymbolId(
+                owner = targetInternal,
+                kind = SymbolKind.METHOD,
+                name = "<init>",
+                descriptor = "()V",
+            ),
         )
 
         // At least one TYPE reference to demo/Target should be recorded (NEW/CHECKCAST/INSTANCEOF/LDC)
         assertTrue(
-            refs.any { it.symbol.kind == SymbolKind.TYPE && it.symbol.owner == "demo/Target" },
-            "expected at least one TYPE reference to demo/Target",
+            refs.any { it.symbol.kind == SymbolKind.TYPE && it.symbol.owner == targetInternal },
+            "expected at least one TYPE reference to $targetInternal",
         )
 
         // Best-effort line numbers: ensure at least one recorded reference has a source line.
