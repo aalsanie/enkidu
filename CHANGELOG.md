@@ -14,6 +14,7 @@
 - For a set of fixtures, suggested fix resolves the issue
 - CLI integration tests run against fixtures
 - Added exporters
+- intellij plugin module
 
 ### Fixed
 - Bytecode type-reference recording to use consistent internal names and correct parameter

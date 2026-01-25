@@ -1,0 +1,21 @@
+<idea-plugin>
+    <id>io.enkidu.linkage-doctor</id>
+    <name>Enkidu Linkage Doctor</name>
+    <vendor url="https://github.com/aalsanie">Enkidu</vendor>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.java</depends>
+
+    <description><![CDATA[
+        Enkidu Linkage Doctor checks whether the code you compiled will still work at runtime by reading your compiled bytecode and resolving every referenced class, method, and field against the exact jars on your runtime classpath.
+    ]]></description>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="Enkidu Linkage Doctor" displayType="BALLOON"/>
+        <toolWindow
+                id="Linkage Doctor"
+                anchor="right"
+                factoryClass="io.enkidu.intellij.plugin.LinkageDoctorToolWindowFactory"
+                icon="/icons/enkidu.svg"/>
+    </extensions>
+</idea-plugin>
