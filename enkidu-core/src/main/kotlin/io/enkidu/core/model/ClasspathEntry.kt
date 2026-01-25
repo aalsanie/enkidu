@@ -20,7 +20,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.enkidu.core
+package io.enkidu.core.model
 
-/** Placeholder for Milestone A wiring. */
-internal object Dummy
+import java.nio.file.Path
+
+/**
+ * A single entry in a runtime classpath, in the exact order it will be searched.
+ */
+sealed interface ClasspathEntry {
+    val path: Path
+
+    data class Directory(
+        override val path: Path,
+    ) : ClasspathEntry
+
+    data class Jar(
+        override val path: Path,
+    ) : ClasspathEntry
+}
