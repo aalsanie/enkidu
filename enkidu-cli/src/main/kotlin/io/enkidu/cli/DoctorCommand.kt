@@ -22,28 +22,17 @@
  */
 package io.enkidu.cli
 
-import io.enkidu.artifacts.v1.EnkiduFingerprints
-import io.enkidu.artifacts.v1.Fingerprint
-import io.enkidu.artifacts.v1.Fingerprints
 import io.enkidu.artifacts.v1.LinkageReport
-import io.enkidu.artifacts.v1.ReportSummary
 import io.enkidu.artifacts.v1.Severity
 import io.enkidu.artifacts.v1.ToolMetadata
-import io.enkidu.core.engine.CallGraphIndex
-import io.enkidu.core.engine.LinkageFailureClassifier
-import io.enkidu.core.model.ClasspathSnapshot
-import io.enkidu.core.resolve.JvmLinkageResolver
-import io.enkidu.core.scan.BytecodeReference
-import io.enkidu.core.scan.BytecodeReferenceScanner
+import io.enkidu.core.engine.LinkageDoctorEngine
+import io.enkidu.core.engine.LinkageDoctorRequest
 import io.enkidu.export.EnkiduReportWriters
 import picocli.CommandLine
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.Callable
-import java.util.zip.ZipFile
-import kotlin.io.path.isDirectory
-import kotlin.io.path.isRegularFile
 
 @CommandLine.Command(
     name = "doctor",
@@ -105,34 +94,21 @@ internal class DoctorCommand : Callable<Int> {
     override fun call(): Int =
         try {
             val resolvedClasspath = resolveClasspathEntries(classpathEntries.toList(), classpathFile)
-            val snapshot = ClasspathSnapshot.fromPaths(resolvedClasspath)
-
-            val references = scanTargets(targets.toList())
-            val callGraph = CallGraphIndex.fromReferences(references)
-
-            val failures =
-                JvmLinkageResolver(snapshot).use { resolver ->
-                    val classifier = LinkageFailureClassifier(snapshot)
-                    references.mapNotNull { classifier.classify(it, resolver, callGraph) }
-                }
+            val engine = LinkageDoctorEngine()
 
             val report =
-                LinkageReport(
-                    tool =
-                        ToolMetadata(
-                            name = TOOL_NAME,
-                            version = BuildInfo.version,
-                            resolverMode = RESOLVER_MODE,
-                        ),
-                    fingerprints =
-                        Fingerprints(
-                            classpath = fingerprintOfPaths(resolvedClasspath),
-                            targets = fingerprintOfPaths(targets.toList()),
-                            report = null,
-                        ),
-                    summary = ReportSummary(failureCount = 0, failureCountByType = emptyMap()),
-                    failures = failures,
-                ).canonical()
+                engine.run(
+                    LinkageDoctorRequest(
+                        tool =
+                            ToolMetadata(
+                                name = TOOL_NAME,
+                                version = BuildInfo.version,
+                                resolverMode = RESOLVER_MODE,
+                            ),
+                        targets = targets.toList(),
+                        runtimeClasspath = resolvedClasspath,
+                    ),
+                )
 
             val bytes =
                 when (format) {
@@ -208,83 +184,6 @@ internal class DoctorCommand : Callable<Int> {
         }
 
         return combined
-    }
-
-    private fun scanTargets(targets: List<Path>): List<BytecodeReference> {
-        val scanner = BytecodeReferenceScanner()
-        val out = mutableListOf<BytecodeReference>()
-
-        for (target in targets) {
-            val t = target.toAbsolutePath().normalize()
-            require(Files.exists(t)) { "target does not exist: $t" }
-            require(Files.isReadable(t)) { "target is not readable: $t" }
-
-            when {
-                t.isDirectory() -> out.addAll(scanDirectory(scanner, t))
-                t.isRegularFile() && looksLikeJar(t) -> out.addAll(scanJar(scanner, t))
-                else -> throw IllegalArgumentException("unsupported target: $t")
-            }
-        }
-
-        return out
-    }
-
-    private fun scanDirectory(
-        scanner: BytecodeReferenceScanner,
-        dir: Path,
-    ): List<BytecodeReference> {
-        val classFiles =
-            Files.walk(dir).use { stream ->
-                stream
-                    .filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".class") }
-                    .sorted()
-                    .toList()
-            }
-
-        val out = mutableListOf<BytecodeReference>()
-        for (file in classFiles) {
-            out.addAll(scanner.scanClassBytes(Files.readAllBytes(file)))
-        }
-        return out
-    }
-
-    private fun scanJar(
-        scanner: BytecodeReferenceScanner,
-        jar: Path,
-    ): List<BytecodeReference> {
-        ZipFile(jar.toFile()).use { zip ->
-            val entries =
-                zip
-                    .entries()
-                    .toList()
-                    .filter { !it.isDirectory && it.name.endsWith(".class") }
-                    .sortedBy { it.name }
-
-            val out = mutableListOf<BytecodeReference>()
-            for (e in entries) {
-                val bytes = zip.getInputStream(e).use { it.readBytes() }
-                out.addAll(scanner.scanClassBytes(bytes))
-            }
-            return out
-        }
-    }
-
-    private fun looksLikeJar(path: Path): Boolean {
-        val name = path.fileName.toString().lowercase()
-        return name.endsWith(".jar") || name.endsWith(".zip")
-    }
-
-    private fun fingerprintOfPaths(paths: List<Path>): Fingerprint {
-        val normalized =
-            paths
-                .map {
-                    it
-                        .toAbsolutePath()
-                        .normalize()
-                        .toString()
-                        .replace(Char(92), '/')
-                }.joinToString(separator = "\n")
-        return Fingerprint(algorithm = "SHA-256", value = EnkiduFingerprints.sha256HexUtf8(normalized))
     }
 
     private companion object {
