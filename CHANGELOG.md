@@ -15,6 +15,7 @@
 - CLI integration tests run against fixtures
 - Added exporters
 - intellij plugin module
+- Users can reproduce scans in CLI by copying the classpath manifest
 
 ### Fixed
-- Bytecode type-reference recording to use consistent internal names and correct parameter
+- Bytecode type-reference recording to use consistent internal names

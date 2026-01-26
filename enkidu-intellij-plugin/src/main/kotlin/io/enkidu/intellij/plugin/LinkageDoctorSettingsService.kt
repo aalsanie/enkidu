@@ -26,43 +26,37 @@ import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 
-@State(
-    name = "EnkiduLinkageDoctorSettings",
-    storages = [Storage("enkidu-linkage-doctor.xml")],
-)
 @Service(Service.Level.PROJECT)
-class LinkageDoctorSettingsService(
-    private val project: Project,
-) : PersistentStateComponent<LinkageDoctorSettingsService.State> {
-    data class State(
-        var classpathManifestPath: String? = null,
-        var outputFormat: OutputFormat = OutputFormat.JSON,
-        var failOnPolicy: FailOnPolicy = FailOnPolicy.ANY,
-    )
+@State(name = "EnkiduLinkageDoctorSettings", storages = [Storage("enkidu-linkage-doctor.xml")])
+class LinkageDoctorSettingsService : PersistentStateComponent<LinkageDoctorSettingsState> {
+    private var internalState: LinkageDoctorSettingsState = LinkageDoctorSettingsState()
 
-    private var state: State = State()
+    override fun getState(): LinkageDoctorSettingsState = internalState
 
-    override fun getState(): State = state
-
-    override fun loadState(state: State) {
-        this.state = state
+    override fun loadState(state: LinkageDoctorSettingsState) {
+        internalState = state
     }
+
+    /**
+     * Name must NOT be "state" to avoid generating a JVM getState() clash with PersistentStateComponent#getState().
+     */
+    val settings: LinkageDoctorSettingsState
+        get() = internalState
 
     companion object {
-        fun get(project: Project): LinkageDoctorSettingsService = project.getService(LinkageDoctorSettingsService::class.java)
+        fun get(project: Project): LinkageDoctorSettingsService = project.service()
     }
 }
 
-enum class OutputFormat {
-    JSON,
-    SARIF,
-    HTML,
-}
-
-enum class FailOnPolicy {
-    ANY,
-    ERROR_ONLY,
-    NONE,
-}
+/**
+ * Keep all inputs explicit.
+ */
+data class LinkageDoctorSettingsState(
+    var classpathProviderId: String? = null,
+    var classpathManifestPath: String? = null,
+    var outputFormat: OutputFormat = OutputFormat.JSON,
+    var failOnPolicy: FailOnPolicy = FailOnPolicy.ANY,
+)

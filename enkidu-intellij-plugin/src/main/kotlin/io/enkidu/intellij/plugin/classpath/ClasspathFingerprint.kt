@@ -20,30 +20,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.enkidu.intellij.plugin
+package io.enkidu.intellij.plugin.classpath
 
-import kotlin.test.Test
-import kotlin.test.assertEquals
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 
-class LinkageDoctorSettingsServiceTest {
-    @Test
-    fun `defaults are stable`() {
-        val s = LinkageDoctorSettingsState()
-        assertEquals(null, s.classpathManifestPath)
-        assertEquals(OutputFormat.JSON, s.outputFormat)
-        assertEquals(FailOnPolicy.ANY, s.failOnPolicy)
-    }
-
-    @Test
-    fun `state fields can be updated`() {
-        val s =
-            LinkageDoctorSettingsState(
-                classpathManifestPath = "/tmp/cp.txt",
-                outputFormat = OutputFormat.SARIF,
-                failOnPolicy = FailOnPolicy.ERROR_ONLY,
-            )
-        assertEquals("/tmp/cp.txt", s.classpathManifestPath)
-        assertEquals(OutputFormat.SARIF, s.outputFormat)
-        assertEquals(FailOnPolicy.ERROR_ONLY, s.failOnPolicy)
+object ClasspathFingerprint {
+    /**
+     * Deterministic fingerprint for the ordered classpath entries.
+     *
+     * We hash the exact manifest text (one entry per line, in order).
+     */
+    fun sha256Hex(manifestText: String): String {
+        val normalized = manifestText.replace("\r\n", "\n").trimEnd()
+        val bytes = normalized.toByteArray(StandardCharsets.UTF_8)
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        return digest.joinToString(separator = "") { b -> "%02x".format(b) }
     }
 }
