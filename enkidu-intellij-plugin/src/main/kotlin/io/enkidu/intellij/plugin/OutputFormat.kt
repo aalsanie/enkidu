@@ -22,28 +22,11 @@
  */
 package io.enkidu.intellij.plugin
 
-import kotlin.test.Test
-import kotlin.test.assertEquals
-
-class LinkageDoctorSettingsServiceTest {
-    @Test
-    fun `defaults are stable`() {
-        val s = LinkageDoctorSettingsState()
-        assertEquals(null, s.classpathManifestPath)
-        assertEquals(OutputFormat.JSON, s.outputFormat)
-        assertEquals(FailOnPolicy.ANY, s.failOnPolicy)
-    }
-
-    @Test
-    fun `state fields can be updated`() {
-        val s =
-            LinkageDoctorSettingsState(
-                classpathManifestPath = "/tmp/cp.txt",
-                outputFormat = OutputFormat.SARIF,
-                failOnPolicy = FailOnPolicy.ERROR_ONLY,
-            )
-        assertEquals("/tmp/cp.txt", s.classpathManifestPath)
-        assertEquals(OutputFormat.SARIF, s.outputFormat)
-        assertEquals(FailOnPolicy.ERROR_ONLY, s.failOnPolicy)
-    }
+/**
+ * Output formats supported by the IntelliJ UI exporter.
+ */
+enum class OutputFormat {
+    JSON,
+    SARIF,
+    HTML,
 }

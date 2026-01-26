@@ -55,10 +55,13 @@ import io.enkidu.artifacts.v1.ToolMetadata
 import io.enkidu.core.engine.LinkageDoctorEngine
 import io.enkidu.core.engine.LinkageDoctorRequest
 import io.enkidu.export.EnkiduReportWriters
+import io.enkidu.intellij.plugin.classpath.ClasspathFingerprint
+import io.enkidu.intellij.plugin.classpath.ClasspathProvider
+import io.enkidu.intellij.plugin.classpath.ClasspathProviderContext
+import io.enkidu.intellij.plugin.classpath.ClasspathProviders
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.datatransfer.StringSelection
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.JButton
@@ -78,25 +81,35 @@ class LinkageDoctorToolWindowPanel(
     private val settings: LinkageDoctorSettingsService = LinkageDoctorSettingsService.get(project)
 
     private val moduleCombo: ComboBox<Module>
+    private val classpathProviderCombo: ComboBox<ClasspathProvider>
     private val classpathField: JBTextField
     private val formatCombo: ComboBox<OutputFormat>
     private val failOnCombo: ComboBox<FailOnPolicy>
 
     private val runButton: JButton
     private val exportButton: JButton
-    private val copyButton: JButton
+    private val copyFailureButton: JButton
+    private val copyClasspathButton: JButton
 
     private val tree: Tree
     private val treeModel: DefaultTreeModel
+
+    private val classpathUsed: JBTextArea
+    private val classpathFingerprintLabel: JBLabel
     private val details: JBTextArea
 
     private var lastReport: LinkageReport? = null
     private var lastSelectedFailure: LinkageFailure? = null
+    private var lastClasspathManifest: String? = null
 
     init {
         val modules = ModuleManager.getInstance(project).modules.sortedBy { it.name }
         moduleCombo = ComboBox(modules.toTypedArray())
         moduleCombo.preferredSize = Dimension(JBUI.scale(260), moduleCombo.preferredSize.height)
+
+        val providers = ClasspathProviders.all().toTypedArray()
+        classpathProviderCombo = ComboBox(providers)
+        classpathProviderCombo.preferredSize = Dimension(JBUI.scale(220), classpathProviderCombo.preferredSize.height)
 
         classpathField = JBTextField(settings.state.classpathManifestPath.orEmpty())
         classpathField.emptyText.text = "Classpath manifest (one entry per line)"
@@ -109,12 +122,21 @@ class LinkageDoctorToolWindowPanel(
 
         runButton = JButton("Run")
         exportButton = JButton("Export")
-        copyButton = JButton("Copy")
+        copyFailureButton = JButton("Copy failure")
+        copyClasspathButton = JButton("Copy classpath")
 
         val root = DefaultMutableTreeNode("No results")
         treeModel = DefaultTreeModel(root)
         tree = Tree(treeModel)
+        @Suppress("DEPRECATION")
         TreeSpeedSearch(tree)
+
+        classpathFingerprintLabel = JBLabel("Classpath: (not resolved)")
+
+        classpathUsed = JBTextArea()
+        classpathUsed.isEditable = false
+        classpathUsed.lineWrap = false
+        classpathUsed.emptyText.text = "Run a scan to see the exact classpath used (copy-pastable for CLI)."
 
         details = JBTextArea()
         details.isEditable = false
@@ -122,8 +144,13 @@ class LinkageDoctorToolWindowPanel(
         details.wrapStyleWord = true
         details.emptyText.text = "Select a failure to see details. Double-click a failure to navigate."
 
+        // Restore provider selection deterministically.
+        val savedProvider = ClasspathProviders.byId(settings.state.classpathProviderId)
+        classpathProviderCombo.selectedItem = savedProvider
+
         component = buildUi()
         wireActions()
+        applyClasspathUiState()
     }
 
     private fun buildUi(): JComponent {
@@ -140,6 +167,7 @@ class LinkageDoctorToolWindowPanel(
 
         val classpathPanel = JPanel(HorizontalLayout(JBUI.scale(6)))
         classpathPanel.add(JBLabel("Classpath:"))
+        classpathPanel.add(classpathProviderCombo)
         classpathPanel.add(classpathField)
         classpathField.preferredSize = Dimension(JBUI.scale(360), classpathField.preferredSize.height)
         classpathPanel.add(browseButton)
@@ -158,11 +186,18 @@ class LinkageDoctorToolWindowPanel(
         toolbar.addSeparator()
         toolbar.add(runButton)
         toolbar.add(exportButton)
-        toolbar.add(copyButton)
+        toolbar.add(copyFailureButton)
+        toolbar.add(copyClasspathButton)
+
+        // Left: failures tree
+        // Right: vertical splitter -> classpath used (top) + details (bottom)
+        val right = JBSplitter(true, 0.35f)
+        right.firstComponent = buildClasspathUsedPanel()
+        right.secondComponent = ScrollPaneFactory.createScrollPane(details, true)
 
         val splitter = JBSplitter(false, 0.55f)
         splitter.firstComponent = ScrollPaneFactory.createScrollPane(tree, true)
-        splitter.secondComponent = ScrollPaneFactory.createScrollPane(details, true)
+        splitter.secondComponent = right
 
         val panel = JPanel(BorderLayout())
         panel.add(toolbar, BorderLayout.NORTH)
@@ -188,7 +223,20 @@ class LinkageDoctorToolWindowPanel(
         return panel
     }
 
+    private fun buildClasspathUsedPanel(): JComponent {
+        val panel = JPanel(BorderLayout())
+        panel.border = JBUI.Borders.empty(8)
+        panel.add(classpathFingerprintLabel, BorderLayout.NORTH)
+        panel.add(ScrollPaneFactory.createScrollPane(classpathUsed, true), BorderLayout.CENTER)
+        return panel
+    }
+
     private fun wireActions() {
+        classpathProviderCombo.addActionListener {
+            applyClasspathUiState()
+            persistSettings()
+        }
+
         runButton.addActionListener {
             persistSettings()
             runScan()
@@ -199,7 +247,7 @@ class LinkageDoctorToolWindowPanel(
             exportLastReport()
         }
 
-        copyButton.addActionListener {
+        copyFailureButton.addActionListener {
             val failure = lastSelectedFailure
             if (failure == null) {
                 notify("Nothing to copy", "Select a failure first.", NotificationType.INFORMATION)
@@ -211,6 +259,19 @@ class LinkageDoctorToolWindowPanel(
                 .systemClipboard
                 .setContents(StringSelection(json), null)
             notify("Copied", "Failure JSON copied to clipboard.", NotificationType.INFORMATION)
+        }
+
+        copyClasspathButton.addActionListener {
+            val manifest = lastClasspathManifest
+            if (manifest.isNullOrBlank()) {
+                notify("Nothing to copy", "Run a scan first to resolve the classpath.", NotificationType.INFORMATION)
+                return@addActionListener
+            }
+            java.awt.Toolkit
+                .getDefaultToolkit()
+                .systemClipboard
+                .setContents(StringSelection(manifest), null)
+            notify("Copied", "Classpath manifest copied to clipboard.", NotificationType.INFORMATION)
         }
 
         tree.addTreeSelectionListener(
@@ -240,7 +301,15 @@ class LinkageDoctorToolWindowPanel(
         )
     }
 
+    private fun applyClasspathUiState() {
+        val provider = (classpathProviderCombo.selectedItem as? ClasspathProvider) ?: ClasspathProviders.default()
+        val needsManifestFile = provider.id == "manifest-file"
+        classpathField.isEnabled = needsManifestFile
+    }
+
     private fun persistSettings() {
+        val provider = (classpathProviderCombo.selectedItem as? ClasspathProvider) ?: ClasspathProviders.default()
+        settings.state.classpathProviderId = provider.id
         settings.state.classpathManifestPath = classpathField.text.trim().ifEmpty { null }
         settings.state.outputFormat = (formatCombo.selectedItem as? OutputFormat) ?: OutputFormat.JSON
         settings.state.failOnPolicy = (failOnCombo.selectedItem as? FailOnPolicy) ?: FailOnPolicy.ANY
@@ -265,25 +334,20 @@ class LinkageDoctorToolWindowPanel(
             return
         }
 
-        val manifestPath = classpathField.text.trim()
-        if (manifestPath.isEmpty()) {
-            notify("Invalid input", "Classpath manifest is required.", NotificationType.ERROR)
-            return
-        }
+        val provider = (classpathProviderCombo.selectedItem as? ClasspathProvider) ?: ClasspathProviders.default()
+        val manifestPath = classpathField.text.trim().ifEmpty { null }
 
-        val classpathFile = Path.of(manifestPath)
-        if (!Files.isRegularFile(classpathFile)) {
-            notify("Invalid input", "Classpath manifest not found: $classpathFile", NotificationType.ERROR)
-            return
-        }
+        val ctx =
+            ClasspathProviderContext(
+                manifestFile = manifestPath?.let { Path.of(it) },
+            )
 
         object : Task.Backgroundable(project, "Enkidu Linkage Doctor", true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
-                val runtimeClasspath = readClasspathManifest(classpathFile)
-                if (runtimeClasspath.isEmpty()) {
-                    throw IllegalArgumentException("Classpath manifest is empty: $classpathFile")
-                }
+
+                val resolved = provider.resolve(module, ctx)
+                val runtimeClasspath = resolved.entries
 
                 val report =
                     LinkageDoctorEngine().run(
@@ -296,9 +360,14 @@ class LinkageDoctorToolWindowPanel(
 
                 ApplicationManager.getApplication().invokeLater {
                     lastReport = report
+                    lastClasspathManifest = resolved.manifestText
+
+                    classpathUsed.text = resolved.manifestText
+                    val fp = ClasspathFingerprint.sha256Hex(resolved.manifestText)
+                    classpathFingerprintLabel.text = "Classpath fingerprint (sha256): $fp"
+
                     renderReport(report)
-                    val status = statusText(report)
-                    notify("Scan finished", status, NotificationType.INFORMATION)
+                    notify("Scan finished", statusText(report), NotificationType.INFORMATION)
                 }
             }
 
@@ -445,13 +514,6 @@ class LinkageDoctorToolWindowPanel(
         return Path.of(vf.path)
     }
 
-    private fun readClasspathManifest(file: Path): List<Path> =
-        Files
-            .readAllLines(file, StandardCharsets.UTF_8)
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && !it.startsWith("#") }
-            .map { Path.of(it) }
-
     private fun statusText(report: LinkageReport): String {
         val any = report.failures.size
         val errors = report.failures.count { it.severity == Severity.ERROR }
@@ -459,10 +521,7 @@ class LinkageDoctorToolWindowPanel(
         return "Failures: $any (errors=$errors, warnings=$warns)"
     }
 
-    private fun pluginVersion(): String {
-        // Best-effort. If not available (dev), keep deterministic.
-        return this::class.java.`package`?.implementationVersion ?: "dev"
-    }
+    private fun pluginVersion(): String = this::class.java.`package`?.implementationVersion ?: "dev"
 
     private fun notify(
         title: String,
@@ -479,7 +538,6 @@ class LinkageDoctorToolWindowPanel(
     private companion object {
         const val TOOL_NAME: String = "enkidu-linkage-doctor"
         const val RESOLVER_MODE: String = "jvm-linkage-sim-v1"
-
         const val NOTIFICATION_GROUP_ID: String = "Enkidu Linkage Doctor"
     }
 }
