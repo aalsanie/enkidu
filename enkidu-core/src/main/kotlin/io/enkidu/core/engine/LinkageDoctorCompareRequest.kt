@@ -20,10 +20,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.enkidu.intellij.plugin
+package io.enkidu.core.engine
 
-enum class OutputFormat {
-    JSON,
-    SARIF,
-    HTML,
-}
+import io.enkidu.artifacts.v1.ToolMetadata
+import java.nio.file.Path
+
+data class LinkageDoctorCompareRequest(
+    val tool: ToolMetadata,
+    val targets: List<Path>,
+    val classpathA: List<Path>,
+    val classpathB: List<Path>,
+    val labelA: String = "A",
+    val labelB: String = "B",
+)

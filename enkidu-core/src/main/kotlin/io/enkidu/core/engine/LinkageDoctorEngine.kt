@@ -22,12 +22,19 @@
  */
 package io.enkidu.core.engine
 
+import io.enkidu.artifacts.v1.ClasspathIdentity
+import io.enkidu.artifacts.v1.CompareReport
+import io.enkidu.artifacts.v1.CompareSummary
+import io.enkidu.artifacts.v1.ComparedClasspaths
 import io.enkidu.artifacts.v1.EnkiduFingerprints
 import io.enkidu.artifacts.v1.Fingerprint
 import io.enkidu.artifacts.v1.Fingerprints
+import io.enkidu.artifacts.v1.LinkageFailure
 import io.enkidu.artifacts.v1.LinkageReport
 import io.enkidu.artifacts.v1.ReportSummary
+import io.enkidu.artifacts.v1.WinnerChange
 import io.enkidu.core.model.ClasspathSnapshot
+import io.enkidu.core.model.JarIndex
 import io.enkidu.core.resolve.JvmLinkageResolver
 import io.enkidu.core.scan.BytecodeReference
 import io.enkidu.core.scan.TargetReferenceScanner
@@ -74,19 +81,174 @@ class LinkageDoctorEngine(
         return report.canonical()
     }
 
-    private fun fingerprintOfPaths(paths: List<Path>): Fingerprint {
-        val normalized =
-            paths.joinToString(separator = "\n") {
-                it
-                    .toAbsolutePath()
-                    .normalize()
-                    .toString()
-                    .replace(Char(92), '/')
-            }
+    /**
+     * Compare linkage between two runtime classpaths.
+     *
+     * Common use-case: "works locally" (IDE/test runtime) but fails in production (slimmed/relocated classpath).
+     */
+    fun compare(request: LinkageDoctorCompareRequest): CompareReport {
+        require(request.targets.isNotEmpty()) { "targets must not be empty." }
+        require(request.classpathA.isNotEmpty()) { "classpathA must not be empty." }
+        require(request.classpathB.isNotEmpty()) { "classpathB must not be empty." }
 
+        val references = targetScanner.scanTargets(request.targets)
+
+        val reportA =
+            run(
+                LinkageDoctorRequest(
+                    tool = request.tool,
+                    targets = request.targets,
+                    runtimeClasspath = request.classpathA,
+                ),
+            )
+
+        val reportB =
+            run(
+                LinkageDoctorRequest(
+                    tool = request.tool,
+                    targets = request.targets,
+                    runtimeClasspath = request.classpathB,
+                ),
+            )
+
+        val keyA = reportA.failures.associateBy { failureKey(it) }
+        val keyB = reportB.failures.associateBy { failureKey(it) }
+
+        val regressions =
+            keyB.keys
+                .minus(keyA.keys)
+                .mapNotNull { keyB[it] }
+                .sortedWith(LinkageFailure.CANONICAL_ORDER)
+
+        val fixed =
+            keyA.keys
+                .minus(keyB.keys)
+                .mapNotNull { keyA[it] }
+                .sortedWith(LinkageFailure.CANONICAL_ORDER)
+
+        val winnerChanges = computeWinnerChanges(references, request.classpathA, request.classpathB)
+
+        val summary =
+            CompareSummary(
+                totalFailuresA = reportA.failures.size,
+                totalFailuresB = reportB.failures.size,
+                regressions = regressions.size,
+                fixed = fixed.size,
+                winnerChanges = winnerChanges.size,
+            )
+
+        val normalizedTargets = normalizeForFingerprint(request.targets)
+        val normalizedA = normalizeForFingerprint(request.classpathA)
+        val normalizedB = normalizeForFingerprint(request.classpathB)
+
+        val compare =
+            CompareReport(
+                tool = request.tool,
+                compared =
+                    ComparedClasspaths(
+                        targets = normalizedTargets,
+                        classpathA =
+                            ClasspathIdentity(
+                                label = request.labelA,
+                                fingerprintSha256 = EnkiduFingerprints.sha256HexUtf8(normalizedA.joinToString("\n")),
+                                entryCount = request.classpathA.size,
+                            ),
+                        classpathB =
+                            ClasspathIdentity(
+                                label = request.labelB,
+                                fingerprintSha256 = EnkiduFingerprints.sha256HexUtf8(normalizedB.joinToString("\n")),
+                                entryCount = request.classpathB.size,
+                            ),
+                    ),
+                summary = summary,
+                regressions = regressions,
+                fixed = fixed,
+                winnerChanges = winnerChanges,
+            )
+
+        return compare.canonical()
+    }
+
+    private fun fingerprintOfPaths(paths: List<Path>): Fingerprint {
+        val normalized = normalizeForFingerprint(paths).joinToString(separator = "\n")
         return Fingerprint(
             algorithm = "SHA-256",
             value = EnkiduFingerprints.sha256HexUtf8(normalized),
         )
     }
+
+    private fun normalizeForFingerprint(paths: List<Path>): List<String> =
+        paths.map {
+            it
+                .toAbsolutePath()
+                .normalize()
+                .toString()
+                .replace(Char(92), '/')
+        }
+
+    private fun failureKey(f: LinkageFailure): String {
+        val site = f.referenceSite
+        val sym = f.symbol
+
+        val owner = sym?.owner.orEmpty()
+        val name = sym?.name.orEmpty()
+        val desc = sym?.descriptor.orEmpty()
+
+        // A stable identity that survives evidence/fix-plan differences.
+        return buildString {
+            append(f.type.name)
+            append('|')
+            append(f.severity.name)
+            append('|')
+            append(site.callerClass)
+            append('|')
+            append(site.callerMethod)
+            append('|')
+            append(site.callerDescriptor)
+            append('|')
+            append(site.line ?: -1)
+            append('|')
+            append(site.bytecodeOffset ?: -1)
+            append('|')
+            append(owner)
+            append('|')
+            append(name)
+            append('|')
+            append(desc)
+            append('|')
+            append(f.message)
+        }
+    }
+
+    private fun computeWinnerChanges(
+        references: List<BytecodeReference>,
+        classpathA: List<Path>,
+        classpathB: List<Path>,
+    ): List<WinnerChange> {
+        val jarA = JarIndex.build(ClasspathSnapshot.fromPaths(classpathA))
+        val jarB = JarIndex.build(ClasspathSnapshot.fromPaths(classpathB))
+
+        val interestingBinaryClasses: Set<String> =
+            references
+                .asSequence()
+                .flatMap { seqOf(it.site.callerClass, it.symbol.owner) }
+                .map { it.replace('/', '.') }
+                .filter { it.isNotBlank() }
+                .toSet()
+
+        val changes = mutableListOf<WinnerChange>()
+        for (cls in interestingBinaryClasses.sorted()) {
+            val winA = jarA.winnerOf(cls)?.entryPath?.toString()
+            val winB = jarB.winnerOf(cls)?.entryPath?.toString()
+            if (winA != null && winB != null && winA != winB) {
+                changes += WinnerChange(className = cls, winnerA = winA, winnerB = winB)
+            }
+        }
+        return changes
+    }
+
+    private fun <T> seqOf(
+        a: T,
+        b: T,
+    ): Sequence<T> = sequenceOf(a, b)
 }

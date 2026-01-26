@@ -43,7 +43,7 @@ object EnkiduCli {
 @CommandLine.Command(
     name = "enkidu",
     mixinStandardHelpOptions = true,
-    subcommands = [DoctorCommand::class],
+    subcommands = [DoctorCommand::class, CompareCommand::class],
     description = ["Enkidu Linkage Doctor — predict runtime linkage failures against an explicit runtime classpath."],
 )
 internal class RootCommand : Runnable {

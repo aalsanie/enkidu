@@ -22,6 +22,7 @@
  */
 package io.enkidu.export
 
+import io.enkidu.artifacts.v1.CompareReport
 import io.enkidu.artifacts.v1.EnkiduJson
 import io.enkidu.artifacts.v1.FailureType
 import io.enkidu.artifacts.v1.FixPlanItem
@@ -38,6 +39,8 @@ import java.nio.charset.StandardCharsets
  */
 object EnkiduReportWriters {
     fun json(report: LinkageReport): ByteArray = EnkiduJson.prettyWriter.writeValueAsBytes(report.canonical())
+
+    fun compareJsonV1(report: CompareReport): ByteArray = EnkiduJson.prettyWriter.writeValueAsBytes(report.canonical())
 
     fun sarifV1(report: LinkageReport): ByteArray = SarifWriterV1.write(report.canonical())
 

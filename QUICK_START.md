@@ -41,15 +41,33 @@ Examples:
 Validate a compiled classes directory:
 
 ```bash
-Enkidu doctor   --targets build/classes/kotlin/main   --classpath classpath.txt   --out build/Enkidu   --format json   --fail-on error
+Enkidu doctor   --targets build/classes/kotlin/main \
+  --classpath classpath.txt  \
+  --out build/Enkidu \
+  --format json  \
+  --fail-on error
 ```
 
 Validate a jar:
 
 ```bash
-Enkidu doctor   --targets app/build/libs/app.jar   --classpath classpath.txt   --out build/Enkidu   --format json,sarif,html   --fail-on error
+Enkidu doctor  \
+  --targets app/build/libs/app.jar \
+  --classpath classpath.txt \
+  --out build/Enkidu \
+  --format json,sarif,html \
+  --fail-on error
 ```
 
+Compare classpath:
+
+```shell
+enkidu compare \
+  --targets build/classes/java/main \
+  --classpath-a-manifest /path/to/classpathA.txt \
+  --classpath-b-manifest /path/to/classpathB.txt \
+  --out compare.json
+```
 ---
 
 ## Exit codes (CI-friendly)
