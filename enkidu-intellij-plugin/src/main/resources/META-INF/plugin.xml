@@ -1,13 +1,13 @@
 <idea-plugin>
-    <id>io.enkidu.linkage-doctor</id>
+    <id>io.enkidu</id>
     <name>Enkidu Linkage Doctor</name>
-    <vendor url="https://github.com/aalsanie">Enkidu</vendor>
+    <vendor email="a.aalsanie@outlook.com">A.Alsanie</vendor>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.java</depends>
 
     <description><![CDATA[
-        Enkidu Linkage Doctor checks whether the code you compiled will still work at runtime by reading your compiled bytecode and resolving every referenced class, method, and field against the exact jars on your runtime classpath.
+        Enkidu catches runtime linkage failures early before they reach production.
     ]]></description>
 
     <extensions defaultExtensionNs="com.intellij">
@@ -18,4 +18,28 @@
                 factoryClass="io.enkidu.intellij.plugin.LinkageDoctorToolWindowFactory"
                 icon="/icons/enkidu.svg"/>
     </extensions>
+    <change-notes><![CDATA[
+  <h3>Added</h3>
+  <ul>
+    <li>ASM-based bytecode reference extraction in <code>enkidu-core</code></li>
+    <li>JVM resolution engine that loads symbols from the runtime classpath</li>
+    <li>Hierarchy + interface walk resolution for referenced classes / methods / fields</li>
+    <li>Failure detection for missing symbols, class↔interface mismatches (ICCE), and descriptor mismatches</li>
+    <li>Static-vs-instance field access mismatch detection</li>
+    <li>Actionable, readable reports</li>
+    <li>Fixture-based resolver tests + CLI integration tests (fixtures)</li>
+    <li>Suggested fix validation for fixture failures</li>
+    <li>Exporters (JSON / SARIF / HTML)</li>
+    <li>IntelliJ plugin module</li>
+    <li>Copyable classpath manifest from the IDE for CLI reproduction</li>
+    <li>Compare mode: resolve under two classpaths and report differences</li>
+  </ul>
+
+  <h3>Fixed</h3>
+  <ul>
+    <li>Consistent internal names for bytecode type-reference recording</li>
+    <li>Tool window layout: configuration options no longer overlap or clip</li>
+  </ul>
+]]></change-notes>
+
 </idea-plugin>

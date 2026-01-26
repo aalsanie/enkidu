@@ -1,9 +1,5 @@
 /*
- * Copyright © 2025-2026 | Enkidu
- *
- * Linkage Doctor checks whether the code you compiled will still work at runtime by
- * reading your compiled bytecode and resolving every referenced class, method, and
- * field against the exact jars on your runtime classpath
+ * Copyright © 2025-2026 | Enkidu linkage doctor catches runtime linkage failures before runtime
  *
  * Author: @aalsanie
  *

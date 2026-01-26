@@ -1,9 +1,5 @@
 /*
- * Copyright © 2025-2026 | Enkidu
- *
- * Linkage Doctor checks whether the code you compiled will still work at runtime by
- * reading your compiled bytecode and resolving every referenced class, method, and
- * field against the exact jars on your runtime classpath
+ * Copyright © 2025-2026 | Enkidu linkage doctor catches runtime linkage failures before runtime
  *
  * Author: @aalsanie
  *
@@ -26,6 +22,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleManager
@@ -34,17 +31,20 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.CompilerModuleExtension
 import com.intellij.openapi.ui.ComboBox
-import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.pom.Navigatable
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.ui.JBSplitter
 import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.TreeSpeedSearch
 import com.intellij.ui.components.JBLabel
+import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextArea
-import com.intellij.ui.components.JBTextField
-import com.intellij.ui.components.panels.HorizontalLayout
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.BottomGap
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
 import io.enkidu.artifacts.v1.EnkiduJson
@@ -60,6 +60,7 @@ import io.enkidu.intellij.plugin.classpath.ClasspathProvider
 import io.enkidu.intellij.plugin.classpath.ClasspathProviderContext
 import io.enkidu.intellij.plugin.classpath.ClasspathProviders
 import java.awt.BorderLayout
+import java.awt.CardLayout
 import java.awt.Dimension
 import java.awt.datatransfer.StringSelection
 import java.nio.file.Files
@@ -73,6 +74,12 @@ import javax.swing.event.TreeSelectionListener
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 
+/**
+ * UX goals:
+ * - All configuration is always visible (scrollable), never clipped.
+ * - The tool window has a clear flow: Configure -> Run -> Inspect results.
+ * - Before first run, show instructions (not an empty "No results" state).
+ */
 class LinkageDoctorToolWindowPanel(
     private val project: Project,
 ) {
@@ -80,24 +87,33 @@ class LinkageDoctorToolWindowPanel(
 
     private val settingsService: LinkageDoctorSettingsService = LinkageDoctorSettingsService.get(project)
 
+    // ----- Config controls -----
     private val moduleCombo: ComboBox<Module>
     private val classpathProviderCombo: ComboBox<ClasspathProvider>
-    private val classpathField: JBTextField
+    private val classpathProviderHelp: JBLabel
+    private val classpathManifestField: TextFieldWithBrowseButton
+    private val manifestDescriptor: FileChooserDescriptor
     private val formatCombo: ComboBox<OutputFormat>
     private val failOnCombo: ComboBox<FailOnPolicy>
 
+    // ----- Toolbar actions -----
     private val runButton: JButton
+    private val resetButton: JButton
     private val exportButton: JButton
     private val copyFailureButton: JButton
     private val copyClasspathButton: JButton
 
+    // ----- Results UI -----
+    private val resultsCards: JPanel
+    private val statusLabel: JBLabel
+
     private val tree: Tree
     private val treeModel: DefaultTreeModel
-
+    private val details: JBTextArea
     private val classpathUsed: JBTextArea
     private val classpathFingerprintLabel: JBLabel
-    private val details: JBTextArea
 
+    // ----- State -----
     private var lastReport: LinkageReport? = null
     private var lastSelectedFailure: LinkageFailure? = null
     private var lastClasspathManifest: String? = null
@@ -105,14 +121,25 @@ class LinkageDoctorToolWindowPanel(
     init {
         val modules = ModuleManager.getInstance(project).modules.sortedBy { it.name }
         moduleCombo = ComboBox(modules.toTypedArray())
-        moduleCombo.preferredSize = Dimension(JBUI.scale(260), moduleCombo.preferredSize.height)
+        moduleCombo.minimumSize = Dimension(JBUI.scale(180), moduleCombo.preferredSize.height)
+        moduleCombo.renderer = SimpleListCellRenderer.create("") { it?.name ?: "" }
 
         val providers = ClasspathProviders.all().toTypedArray()
         classpathProviderCombo = ComboBox(providers)
-        classpathProviderCombo.preferredSize = Dimension(JBUI.scale(220), classpathProviderCombo.preferredSize.height)
+        classpathProviderCombo.minimumSize = Dimension(JBUI.scale(220), classpathProviderCombo.preferredSize.height)
+        classpathProviderCombo.renderer = SimpleListCellRenderer.create("") { it?.displayName ?: "" }
 
-        classpathField = JBTextField(settingsService.settings.classpathManifestPath.orEmpty())
-        classpathField.emptyText.text = "Classpath manifest (one entry per line)"
+        classpathProviderHelp = JBLabel()
+        classpathProviderHelp.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+
+        classpathManifestField = TextFieldWithBrowseButton()
+        classpathManifestField.text = settingsService.settings.classpathManifestPath.orEmpty()
+
+        manifestDescriptor =
+            FileChooserDescriptorFactory
+                .createSingleFileDescriptor()
+                .withTitle("Select Classpath Manifest")
+                .withDescription("Select a manifest file that contains one classpath entry per line.")
 
         formatCombo = ComboBox(OutputFormat.entries.toTypedArray())
         formatCombo.selectedItem = settingsService.settings.outputFormat
@@ -121,129 +148,220 @@ class LinkageDoctorToolWindowPanel(
         failOnCombo.selectedItem = settingsService.settings.failOnPolicy
 
         runButton = JButton("Run")
+        resetButton = JButton("Reset")
         exportButton = JButton("Export")
         copyFailureButton = JButton("Copy failure")
         copyClasspathButton = JButton("Copy classpath")
 
-        val root = DefaultMutableTreeNode("No results")
+        statusLabel = JBLabel("Configure and run a scan.")
+        statusLabel.border = JBUI.Borders.empty(6, 8)
+
+        val root = DefaultMutableTreeNode("Run a scan")
         treeModel = DefaultTreeModel(root)
         tree = Tree(treeModel)
-
-        // Newer, non-deprecated install method (constructor is deprecated).
         TreeSpeedSearch.installOn(tree)
-
-        classpathFingerprintLabel = JBLabel("Classpath: (not resolved)")
-
-        classpathUsed = JBTextArea()
-        classpathUsed.isEditable = false
-        classpathUsed.lineWrap = false
-        classpathUsed.emptyText.text = "Run a scan to see the exact classpath used (copy-pastable for CLI)."
 
         details = JBTextArea()
         details.isEditable = false
         details.lineWrap = true
         details.wrapStyleWord = true
-        details.emptyText.text = "Select a failure to see details. Double-click a failure to navigate."
+        details.emptyText.text = "Select a failure to see details. Double-click to navigate to the callsite."
+
+        classpathFingerprintLabel = JBLabel("Classpath fingerprint: (not resolved)")
+        classpathUsed = JBTextArea()
+        classpathUsed.isEditable = false
+        classpathUsed.lineWrap = false
+        classpathUsed.emptyText.text = "Run a scan to see the exact resolved runtime classpath (copy-pastable for CLI)."
+
+        resultsCards = JPanel(CardLayout())
+        resultsCards.add(buildInstructionsPanel(), CARD_INSTRUCTIONS)
+        resultsCards.add(buildResultsPanel(), CARD_RESULTS)
 
         // Restore provider selection deterministically.
-        val savedProvider = ClasspathProviders.byId(settingsService.settings.classpathProviderId)
-        classpathProviderCombo.selectedItem = savedProvider
+        classpathProviderCombo.selectedItem = ClasspathProviders.byId(settingsService.settings.classpathProviderId)
+        updateClasspathProviderHelp()
 
         component = buildUi()
         wireActions()
         applyClasspathUiState()
+        updateButtonsEnabledState()
+        showInstructions()
     }
 
     private fun buildUi(): JComponent {
-        val toolbar = JToolBar()
-        toolbar.isFloatable = false
-        toolbar.border = JBUI.Borders.empty(6)
+        val toolbar = buildToolbar()
 
-        val browseButton = JButton("Browse")
+        val configScroll = ScrollPaneFactory.createScrollPane(buildConfigPanel(), true)
+        configScroll.border = JBUI.Borders.customLine(JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground(), 1)
+        configScroll.minimumSize = Dimension(JBUI.scale(340), JBUI.scale(200))
 
-        val form = JPanel(HorizontalLayout(JBUI.scale(8)))
-        form.border = JBUI.Borders.emptyRight(8)
-        form.add(JBLabel("Module:"))
-        form.add(moduleCombo)
+        val splitter = JBSplitter(false, 0.38f)
+        splitter.firstComponent = configScroll
+        splitter.secondComponent = resultsCards
 
-        val classpathPanel = JPanel(HorizontalLayout(JBUI.scale(6)))
-        classpathPanel.add(JBLabel("Classpath:"))
-        classpathPanel.add(classpathProviderCombo)
-        classpathPanel.add(classpathField)
-        classpathField.preferredSize = Dimension(JBUI.scale(360), classpathField.preferredSize.height)
-        classpathPanel.add(browseButton)
+        return JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(8)
+            add(toolbar, BorderLayout.NORTH)
+            add(splitter, BorderLayout.CENTER)
+        }
+    }
 
-        val opts = JPanel(HorizontalLayout(JBUI.scale(6)))
-        opts.add(JBLabel("Format:"))
-        opts.add(formatCombo)
-        opts.add(JBLabel("Fail-on:"))
-        opts.add(failOnCombo)
+    private fun buildToolbar(): JComponent =
+        JToolBar().apply {
+            isFloatable = false
+            border = JBUI.Borders.empty(4, 0, 8, 0)
 
-        toolbar.add(form)
-        toolbar.addSeparator()
-        toolbar.add(classpathPanel)
-        toolbar.addSeparator()
-        toolbar.add(opts)
-        toolbar.addSeparator()
-        toolbar.add(runButton)
-        toolbar.add(exportButton)
-        toolbar.add(copyFailureButton)
-        toolbar.add(copyClasspathButton)
+            add(runButton)
+            add(resetButton)
+            addSeparator()
+            add(exportButton)
+            add(copyFailureButton)
+            add(copyClasspathButton)
+        }
 
-        // Left: failures tree
-        // Right: vertical splitter -> classpath used (top) + details (bottom)
-        val right = JBSplitter(true, 0.35f)
-        right.firstComponent = buildClasspathUsedPanel()
-        right.secondComponent = ScrollPaneFactory.createScrollPane(details, true)
-
-        val splitter = JBSplitter(false, 0.55f)
-        splitter.firstComponent = ScrollPaneFactory.createScrollPane(tree, true)
-        splitter.secondComponent = right
-
-        val panel = JPanel(BorderLayout())
-        panel.add(toolbar, BorderLayout.NORTH)
-        panel.add(splitter, BorderLayout.CENTER)
-
-        browseButton.addActionListener {
-            val chooser =
-                FileChooserFactory.getInstance().createFileChooser(
-                    FileChooserDescriptor(true, false, false, false, false, false)
-                        .withTitle("Select classpath manifest")
-                        .withDescription("Text file containing one runtime classpath entry per line"),
-                    project,
-                    null,
+    private fun buildConfigPanel(): JComponent =
+        panel {
+            row {
+                label("Enkidu Linkage Doctor").bold()
+            }
+            row {
+                comment(
+                    "Validate runtime linkage against the exact runtime classpath. " +
+                        "Find missing symbols, descriptor mismatches, access issues, and classpath shadowing.",
                 )
+            }.bottomGap(BottomGap.MEDIUM)
 
-            val start =
-                settingsService.settings.classpathManifestPath
-                    ?.let { LocalFileSystem.getInstance().findFileByPath(it) }
+            group("Target") {
+                row("Module") {
+                    cell(moduleCombo).align(AlignX.FILL)
+                }
+                row {
+                    comment("Tip: Build the project first so compiler output exists.")
+                }
+            }
 
-            chooser.choose(project, start).firstOrNull()?.let { vf ->
-                classpathField.text = vf.path
-                persistSettings()
+            group("Classpath") {
+                row("Provider") {
+                    cell(classpathProviderCombo).align(AlignX.FILL)
+                }
+                row {
+                    cell(classpathProviderHelp).align(AlignX.FILL)
+                }
+                row("Manifest") {
+                    cell(classpathManifestField).align(AlignX.FILL)
+                }
+                row {
+                    comment("Manifest is only used by the 'Manifest file' provider.")
+                }
+            }
+
+            group("Output") {
+                row("Format") {
+                    cell(formatCombo)
+                }
+                row("Fail-on") {
+                    cell(failOnCombo)
+                }
+                row {
+                    comment("Fail-on controls whether the scan is treated as FAILED in the UI and notifications.")
+                }
             }
         }
 
-        return panel
+    private fun buildInstructionsPanel(): JComponent {
+        val title = JBLabel("How to use")
+        title.font = JBUI.Fonts.label(16f)
+
+        val body =
+            JBTextArea().apply {
+                isEditable = false
+                isOpaque = false
+                lineWrap = true
+                wrapStyleWord = true
+                text =
+                    """
+                    1) Select a Module.
+                    2) Pick a Classpath provider:
+                       - IDE module runtime: resolves the module runtime classpath from IntelliJ.
+                       - Manifest file: uses a text file containing one classpath entry per line.
+                    3) Choose output format (used for Export) and Fail-on policy.
+                    4) Click Run.
+
+                    After running:
+                    - Failures tab shows grouped linkage failures.
+                    - Double-click a failure to navigate to the callsite (if line info is available).
+                    - Classpath tab shows the exact classpath used (copyable for CLI reproduction).
+                    """.trimIndent()
+            }
+
+        return JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(12)
+            add(title, BorderLayout.NORTH)
+            add(body, BorderLayout.CENTER)
+        }
     }
 
-    private fun buildClasspathUsedPanel(): JComponent {
-        val panel = JPanel(BorderLayout())
-        panel.border = JBUI.Borders.empty(8)
-        panel.add(classpathFingerprintLabel, BorderLayout.NORTH)
-        panel.add(ScrollPaneFactory.createScrollPane(classpathUsed, true), BorderLayout.CENTER)
-        return panel
+    private fun buildResultsPanel(): JComponent {
+        val failuresTab = buildFailuresTab()
+        val classpathTab = buildClasspathTab()
+
+        val tabs = JBTabbedPane()
+        tabs.addTab("Failures", failuresTab)
+        tabs.addTab("Classpath", classpathTab)
+
+        return JPanel(BorderLayout()).apply {
+            add(statusLabel, BorderLayout.NORTH)
+            add(tabs, BorderLayout.CENTER)
+        }
     }
+
+    private fun buildFailuresTab(): JComponent {
+        val left = ScrollPaneFactory.createScrollPane(tree, true)
+        val right = ScrollPaneFactory.createScrollPane(details, true)
+        val splitter = JBSplitter(false, 0.45f)
+        splitter.firstComponent = left
+        splitter.secondComponent = right
+        return splitter
+    }
+
+    private fun buildClasspathTab(): JComponent =
+        JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(8)
+            add(classpathFingerprintLabel, BorderLayout.NORTH)
+            add(ScrollPaneFactory.createScrollPane(classpathUsed, true), BorderLayout.CENTER)
+        }
 
     private fun wireActions() {
         classpathProviderCombo.addActionListener {
+            updateClasspathProviderHelp()
             applyClasspathUiState()
             persistSettings()
         }
 
+        // Browse button: use FileChooserFactory (avoids addBrowseFolderListener API mismatch).
+        classpathManifestField.addActionListener {
+            val chooser = FileChooserFactory.getInstance().createFileChooser(manifestDescriptor, project, component)
+            val chosen = chooser.choose(project).firstOrNull() ?: return@addActionListener
+            classpathManifestField.text = chosen.path
+            persistSettings()
+        }
+
+        // Persist on Enter in the text field as well.
+        classpathManifestField.textField.addActionListener {
+            persistSettings()
+        }
+
+        formatCombo.addActionListener { persistSettings() }
+        failOnCombo.addActionListener { persistSettings() }
+
         runButton.addActionListener {
             persistSettings()
             runScan()
+        }
+
+        resetButton.addActionListener {
+            clearResults()
+            showInstructions()
         }
 
         exportButton.addActionListener {
@@ -289,6 +407,7 @@ class LinkageDoctorToolWindowPanel(
                     lastSelectedFailure = null
                     details.text = ""
                 }
+                updateButtonsEnabledState()
             },
         )
 
@@ -305,16 +424,22 @@ class LinkageDoctorToolWindowPanel(
         )
     }
 
+    private fun updateClasspathProviderHelp() {
+        val provider = (classpathProviderCombo.selectedItem as? ClasspathProvider) ?: ClasspathProviders.default()
+        // JBLabel wraps only with HTML.
+        classpathProviderHelp.text = "<html>${provider.description}</html>"
+    }
+
     private fun applyClasspathUiState() {
         val provider = (classpathProviderCombo.selectedItem as? ClasspathProvider) ?: ClasspathProviders.default()
         val needsManifestFile = provider.id == "manifest-file"
-        classpathField.isEnabled = needsManifestFile
+        classpathManifestField.isEnabled = needsManifestFile
     }
 
     private fun persistSettings() {
         val provider = (classpathProviderCombo.selectedItem as? ClasspathProvider) ?: ClasspathProviders.default()
         settingsService.settings.classpathProviderId = provider.id
-        settingsService.settings.classpathManifestPath = classpathField.text.trim().ifEmpty { null }
+        settingsService.settings.classpathManifestPath = classpathManifestField.text.trim().ifEmpty { null }
         settingsService.settings.outputFormat = (formatCombo.selectedItem as? OutputFormat) ?: OutputFormat.JSON
         settingsService.settings.failOnPolicy = (failOnCombo.selectedItem as? FailOnPolicy) ?: FailOnPolicy.ANY
     }
@@ -339,7 +464,19 @@ class LinkageDoctorToolWindowPanel(
         }
 
         val provider = (classpathProviderCombo.selectedItem as? ClasspathProvider) ?: ClasspathProviders.default()
-        val manifestPath = classpathField.text.trim().ifEmpty { null }
+        val manifestPath = classpathManifestField.text.trim().ifEmpty { null }
+
+        if (provider.id == "manifest-file") {
+            val p = manifestPath?.let { Path.of(it) }
+            if (p == null) {
+                notify("Invalid input", "Classpath manifest is required for the 'Manifest file' provider.", NotificationType.WARNING)
+                return
+            }
+            if (!Files.isRegularFile(p)) {
+                notify("Invalid input", "Classpath manifest not found: $p", NotificationType.WARNING)
+                return
+            }
+        }
 
         val ctx =
             ClasspathProviderContext(
@@ -371,7 +508,11 @@ class LinkageDoctorToolWindowPanel(
                     classpathFingerprintLabel.text = "Classpath fingerprint (sha256): $fp"
 
                     renderReport(report)
-                    notify("Scan finished", statusText(report), NotificationType.INFORMATION)
+                    updateStatus(report)
+                    showResults()
+
+                    val (title, msg, type) = outcomeNotification(report)
+                    notify(title, msg, type)
                 }
             }
 
@@ -427,15 +568,19 @@ class LinkageDoctorToolWindowPanel(
     private fun renderReport(report: LinkageReport) {
         val root = DefaultMutableTreeNode("Failures (${report.failures.size})")
 
-        val grouped = report.failures.groupBy { it.type }
-        grouped.toSortedMap(compareBy { it.name }).forEach { (type, failures) ->
-            val typeNode = DefaultMutableTreeNode("${type.name} (${failures.size})")
-            failures
-                .sortedWith(LinkageFailure.CANONICAL_ORDER)
-                .forEach { failure ->
-                    typeNode.add(DefaultMutableTreeNode(failure))
-                }
-            root.add(typeNode)
+        if (report.failures.isEmpty()) {
+            root.add(DefaultMutableTreeNode("No linkage failures found."))
+        } else {
+            val grouped = report.failures.groupBy { it.type }
+            grouped.toSortedMap(compareBy { it.name }).forEach { (type, failures) ->
+                val typeNode = DefaultMutableTreeNode("${type.name} (${failures.size})")
+                failures
+                    .sortedWith(LinkageFailure.CANONICAL_ORDER)
+                    .forEach { failure ->
+                        typeNode.add(DefaultMutableTreeNode(failure))
+                    }
+                root.add(typeNode)
+            }
         }
 
         treeModel.setRoot(root)
@@ -447,6 +592,7 @@ class LinkageDoctorToolWindowPanel(
 
         details.text = ""
         lastSelectedFailure = null
+        updateButtonsEnabledState()
     }
 
     private fun renderFailureDetails(failure: LinkageFailure): String {
@@ -518,11 +664,74 @@ class LinkageDoctorToolWindowPanel(
         return Path.of(vf.path)
     }
 
-    private fun statusText(report: LinkageReport): String {
+    private fun updateStatus(report: LinkageReport) {
         val any = report.failures.size
         val errors = report.failures.count { it.severity == Severity.ERROR }
         val warns = report.failures.count { it.severity == Severity.WARN }
-        return "Failures: $any (errors=$errors, warnings=$warns)"
+
+        val policy = (failOnCombo.selectedItem as? FailOnPolicy) ?: FailOnPolicy.ANY
+        val failed =
+            when (policy) {
+                FailOnPolicy.ANY -> any > 0
+                FailOnPolicy.ERROR_ONLY -> errors > 0
+            }
+
+        statusLabel.text =
+            if (failed) {
+                "FAILED • Failures: $any (errors=$errors, warnings=$warns)"
+            } else {
+                "OK • Failures: $any (errors=$errors, warnings=$warns)"
+            }
+    }
+
+    private fun outcomeNotification(report: LinkageReport): Triple<String, String, NotificationType> {
+        val any = report.failures.size
+        val errors = report.failures.count { it.severity == Severity.ERROR }
+        val warns = report.failures.count { it.severity == Severity.WARN }
+
+        val policy = (failOnCombo.selectedItem as? FailOnPolicy) ?: FailOnPolicy.ANY
+        val failed =
+            when (policy) {
+                FailOnPolicy.ANY -> any > 0
+                FailOnPolicy.ERROR_ONLY -> errors > 0
+            }
+
+        val msg = "Failures: $any (errors=$errors, warnings=$warns)"
+        return if (failed) {
+            Triple("Scan finished (FAILED)", msg, NotificationType.ERROR)
+        } else {
+            Triple("Scan finished", msg, NotificationType.INFORMATION)
+        }
+    }
+
+    private fun clearResults() {
+        lastReport = null
+        lastSelectedFailure = null
+        lastClasspathManifest = null
+
+        statusLabel.text = "Configure and run a scan."
+        classpathUsed.text = ""
+        classpathFingerprintLabel.text = "Classpath fingerprint: (not resolved)"
+        details.text = ""
+
+        treeModel.setRoot(DefaultMutableTreeNode("Run a scan"))
+        treeModel.reload()
+
+        updateButtonsEnabledState()
+    }
+
+    private fun updateButtonsEnabledState() {
+        exportButton.isEnabled = lastReport != null
+        copyFailureButton.isEnabled = lastSelectedFailure != null
+        copyClasspathButton.isEnabled = !lastClasspathManifest.isNullOrBlank()
+    }
+
+    private fun showInstructions() {
+        (resultsCards.layout as CardLayout).show(resultsCards, CARD_INSTRUCTIONS)
+    }
+
+    private fun showResults() {
+        (resultsCards.layout as CardLayout).show(resultsCards, CARD_RESULTS)
     }
 
     private fun pluginVersion(): String = this::class.java.`package`?.implementationVersion ?: "dev"
@@ -540,8 +749,11 @@ class LinkageDoctorToolWindowPanel(
     }
 
     private companion object {
-        const val TOOL_NAME: String = "enkidu-linkage-doctor"
-        const val RESOLVER_MODE: String = "jvm-linkage-sim-v1"
-        const val NOTIFICATION_GROUP_ID: String = "Enkidu Linkage Doctor"
+        private const val CARD_INSTRUCTIONS: String = "instructions"
+        private const val CARD_RESULTS: String = "results"
+
+        private const val TOOL_NAME: String = "enkidu-linkage-doctor"
+        private const val RESOLVER_MODE: String = "jvm-linkage-sim-v1"
+        private const val NOTIFICATION_GROUP_ID: String = "Enkidu Linkage Doctor"
     }
 }

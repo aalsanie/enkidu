@@ -20,3 +20,4 @@
 
 ### Fixed
 - Bytecode type-reference recording to use consistent internal names
+- Fixed UI options overlapped by window

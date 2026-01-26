@@ -1,13 +1,18 @@
 # Enkidu Linkage Doctor — Quick Start
 
+Before starting, you need two things:
+
+- **Targets**: what you want to validate (compiled classes directory or a jar)
+- **Runtime classpath manifest**: the exact runtime classpath (ordered) you intend to run/ship with
+
 ---
 
 ## 1) Prepare a runtime classpath manifest (`classpath.txt`)
 
-Create a text file containing the **runtime classpath in order**, one entry per line.  
-This should match the exact jars/directories you intend to run/ship with.
+Create a text file containing the **runtime classpath in order**, one entry per line.
 
-**Example: `classpath.txt`**
+Example: `classpath.txt`
+
 ```txt
 /home/username/.m2/repository/com/google/guava/guava/33.1.0-jre/guava-33.1.0-jre.jar
 /home/username/.m2/repository/org/slf4j/slf4j-api/2.0.13/slf4j-api-2.0.13.jar
@@ -16,9 +21,9 @@ This should match the exact jars/directories you intend to run/ship with.
 ```
 
 Notes:
-- Order matters (it affects which jar “wins” when duplicates exist).
+- **Order matters** (it decides which jar “wins” if duplicates exist).
 - Paths can be absolute or relative to where you run the command.
-- Include any runtime directories your app relies on (e.g., `build/resources/main`).
+- Include runtime directories too (resources/classes), not just jars.
 
 ---
 
@@ -41,90 +46,75 @@ Examples:
 Validate a compiled classes directory:
 
 ```bash
-Enkidu doctor   --targets build/classes/kotlin/main \
-  --classpath classpath.txt  \
-  --out build/Enkidu \
-  --format json  \
-  --fail-on error
+enkidu doctor   --targets build/classes/kotlin/main   --classpath classpath.txt   --out build/enkidu   --format json   --fail-on error
 ```
 
 Validate a jar:
 
 ```bash
-Enkidu doctor  \
-  --targets app/build/libs/app.jar \
-  --classpath classpath.txt \
-  --out build/Enkidu \
-  --format json,sarif,html \
-  --fail-on error
+enkidu doctor   --targets app/build/libs/app.jar   --classpath classpath.txt   --out build/enkidu   --format json,sarif,html   --fail-on error
 ```
 
-Compare classpath:
+Compare two classpaths (only if your build supports the `compare` command):
 
-```shell
-enkidu compare \
-  --targets build/classes/java/main \
-  --classpath-a-manifest /path/to/classpathA.txt \
-  --classpath-b-manifest /path/to/classpathB.txt \
-  --out compare.json
+```bash
+enkidu compare   --targets build/classes/java/main   --classpath-a-manifest /path/to/classpathA.txt   --classpath-b-manifest /path/to/classpathB.txt   --out build/enkidu/compare.json
 ```
+
 ---
 
-## Exit codes (CI-friendly)
+## Exit codes
 
-- `0` no failures under the selected policy  
-- `2` failures found (fail the build)  
-- `3` invalid inputs / configuration / unreadable classpath  
+- `0` no failures under the selected policy
+- `2` failures found (fail the build)
+- `3` invalid inputs / configuration / unreadable classpath
 
 ---
 
 ## Outputs
 
-Enkidu can produce exports suitable for humans and CI systems:
-
-- **JSON**: canonical, deterministic machine-readable output
-- **SARIF**: CI annotations and PR checks
-- **HTML**: shareable report for investigation and collaboration
-
-Even if you only care about “CI fail” or the IntelliJ UI, Enkidu benefits from a stable report model so results are reproducible and diffable.
+- **JSON**: canonical, deterministic machine output (diffable)
+- **SARIF**: CI annotations / PR checks
+- **HTML**: shareable report for humans
 
 ---
 
-## IntelliJ plugin
+## IntelliJ plugin (fast feedback)
 
-The IntelliJ plugin is the fast feedback loop:
+Use the Linkage Doctor tool window:
 
-- Run Enkidu Linkage Doctor against the current project output and a chosen runtime classpath profile
-- Group failures by root cause (missing symbol, duplicate/shadowing, descriptor mismatch, SPI/provider issues)
-- Navigate to call sites where line info is available
-- Copy a “doctor note” (evidence + jar winners/losers) into issues/PRs
-- Generate a previewable fix snippet / fix plan for (version alignment, excludes, missing deps, shading/SPI merges)
+1) Select a module
+2) Choose a classpath provider (IDE runtime or manifest file)
+3) Run
+4) Inspect failures (grouped), navigate to call sites when available, copy evidence/classpath for reproduction
 
 ---
 
 ## Gradle usage (verification gate, CLI-driven)
 
-The most valuable workflow is failing CI *before* a runtime crash. Wire Enkidu as a verification step by generating `classpath.txt` from your build tooling and passing it to the CLI.
+The most valuable workflow is failing CI *before* a runtime crash.
 
-A minimal wiring pattern (invoking the CLI) looks like this:
+Minimal wiring pattern:
+- generate `classpath.txt` from your build tooling (ordered runtime classpath)
+- run `enkidu doctor` from `check`
 
 ```kotlin
 // build.gradle.kts (wiring pattern)
-// The exact way you invoke `Enkidu doctor` depends on how you consume the CLI artifact in your build.
+// The exact way you invoke `enkidu doctor` depends on how you consume the CLI artifact in your build.
 
-tasks.register("EnkiduDoctor") {
-  group = "verification"
-  description = "Fails if runtime linkage will break on the shipped classpath."
-  dependsOn("classes")
+tasks.register("enkiduDoctor") {
+    group = "verification"
+    description = "Fails if runtime linkage will break on the shipped classpath."
+    dependsOn("classes")
 
-  doLast {
-    // 1) Write the runtime classpath (ordered) to classpath.txt.
-    // 2) Invoke Enkidu with:
-    //    Enkidu doctor --targets ... --classpath classpath.txt --out ... --format ... --fail-on error
-  }
+    doLast {
+        // 1) Write the runtime classpath (ordered) to classpath.txt.
+        // 2) Invoke:
+        //    enkidu doctor --targets ... --classpath classpath.txt --out ... --format ... --fail-on error
+    }
 }
 
 tasks.named("check") {
-  dependsOn("EnkiduDoctor")
+    dependsOn("enkiduDoctor")
 }
 ```
