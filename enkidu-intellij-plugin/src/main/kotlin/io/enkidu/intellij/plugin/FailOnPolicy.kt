@@ -22,11 +22,7 @@
  */
 package io.enkidu.intellij.plugin
 
-/**
- * UI policy for deciding whether the scan "should fail".
- */
 enum class FailOnPolicy {
-    NONE,
-    ERROR_ONLY,
     ANY,
+    ERROR_ONLY,
 }

@@ -41,7 +41,7 @@ class LinkageDoctorSettingsService : PersistentStateComponent<LinkageDoctorSetti
     }
 
     /**
-     * Name must NOT be "state" to avoid generating a JVM getState() clash with PersistentStateComponent#getState().
+     * Avoid JVM signature clash with PersistentStateComponent#getState().
      */
     val settings: LinkageDoctorSettingsState
         get() = internalState

@@ -16,6 +16,7 @@
 - Added exporters
 - intellij plugin module
 - Users can reproduce scans in CLI by copying the classpath manifest
+- Engine mode that runs resolution under two classpaths and reports
 
 ### Fixed
 - Bytecode type-reference recording to use consistent internal names

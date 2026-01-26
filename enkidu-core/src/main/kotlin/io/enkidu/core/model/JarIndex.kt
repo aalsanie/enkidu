@@ -39,6 +39,8 @@ import kotlin.io.path.isRegularFile
 class JarIndex private constructor(
     private val classToLocations: Map<String, List<ClassLocation>>,
 ) {
+    fun classes(): Set<String> = classToLocations.keys
+
     /**
      * Returns the winning location for [binaryClassName], or null if it does not exist on the classpath.
      *

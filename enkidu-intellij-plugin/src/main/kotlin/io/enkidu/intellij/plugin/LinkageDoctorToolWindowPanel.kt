@@ -78,7 +78,7 @@ class LinkageDoctorToolWindowPanel(
 ) {
     val component: JComponent
 
-    private val settings: LinkageDoctorSettingsService = LinkageDoctorSettingsService.get(project)
+    private val settingsService: LinkageDoctorSettingsService = LinkageDoctorSettingsService.get(project)
 
     private val moduleCombo: ComboBox<Module>
     private val classpathProviderCombo: ComboBox<ClasspathProvider>
@@ -111,14 +111,14 @@ class LinkageDoctorToolWindowPanel(
         classpathProviderCombo = ComboBox(providers)
         classpathProviderCombo.preferredSize = Dimension(JBUI.scale(220), classpathProviderCombo.preferredSize.height)
 
-        classpathField = JBTextField(settings.state.classpathManifestPath.orEmpty())
+        classpathField = JBTextField(settingsService.settings.classpathManifestPath.orEmpty())
         classpathField.emptyText.text = "Classpath manifest (one entry per line)"
 
         formatCombo = ComboBox(OutputFormat.entries.toTypedArray())
-        formatCombo.selectedItem = settings.state.outputFormat
+        formatCombo.selectedItem = settingsService.settings.outputFormat
 
         failOnCombo = ComboBox(FailOnPolicy.entries.toTypedArray())
-        failOnCombo.selectedItem = settings.state.failOnPolicy
+        failOnCombo.selectedItem = settingsService.settings.failOnPolicy
 
         runButton = JButton("Run")
         exportButton = JButton("Export")
@@ -128,8 +128,9 @@ class LinkageDoctorToolWindowPanel(
         val root = DefaultMutableTreeNode("No results")
         treeModel = DefaultTreeModel(root)
         tree = Tree(treeModel)
-        @Suppress("DEPRECATION")
-        TreeSpeedSearch(tree)
+
+        // Newer, non-deprecated install method (constructor is deprecated).
+        TreeSpeedSearch.installOn(tree)
 
         classpathFingerprintLabel = JBLabel("Classpath: (not resolved)")
 
@@ -145,7 +146,7 @@ class LinkageDoctorToolWindowPanel(
         details.emptyText.text = "Select a failure to see details. Double-click a failure to navigate."
 
         // Restore provider selection deterministically.
-        val savedProvider = ClasspathProviders.byId(settings.state.classpathProviderId)
+        val savedProvider = ClasspathProviders.byId(settingsService.settings.classpathProviderId)
         classpathProviderCombo.selectedItem = savedProvider
 
         component = buildUi()
@@ -213,7 +214,10 @@ class LinkageDoctorToolWindowPanel(
                     null,
                 )
 
-            val start = settings.state.classpathManifestPath?.let { LocalFileSystem.getInstance().findFileByPath(it) }
+            val start =
+                settingsService.settings.classpathManifestPath
+                    ?.let { LocalFileSystem.getInstance().findFileByPath(it) }
+
             chooser.choose(project, start).firstOrNull()?.let { vf ->
                 classpathField.text = vf.path
                 persistSettings()
@@ -309,10 +313,10 @@ class LinkageDoctorToolWindowPanel(
 
     private fun persistSettings() {
         val provider = (classpathProviderCombo.selectedItem as? ClasspathProvider) ?: ClasspathProviders.default()
-        settings.state.classpathProviderId = provider.id
-        settings.state.classpathManifestPath = classpathField.text.trim().ifEmpty { null }
-        settings.state.outputFormat = (formatCombo.selectedItem as? OutputFormat) ?: OutputFormat.JSON
-        settings.state.failOnPolicy = (failOnCombo.selectedItem as? FailOnPolicy) ?: FailOnPolicy.ANY
+        settingsService.settings.classpathProviderId = provider.id
+        settingsService.settings.classpathManifestPath = classpathField.text.trim().ifEmpty { null }
+        settingsService.settings.outputFormat = (formatCombo.selectedItem as? OutputFormat) ?: OutputFormat.JSON
+        settingsService.settings.failOnPolicy = (failOnCombo.selectedItem as? FailOnPolicy) ?: FailOnPolicy.ANY
     }
 
     private fun runScan() {
