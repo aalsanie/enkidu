@@ -3,6 +3,7 @@
 
 ## [unreleased]
 
+## [0.1.1]
 ### Added
 - ASM dependency to enkidu-core to support bytecode reference extraction
 - JVM resolution engine that loads classes from the runtime classpath
