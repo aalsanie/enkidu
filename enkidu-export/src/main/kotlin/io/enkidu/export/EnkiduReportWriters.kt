@@ -236,6 +236,19 @@ internal object HtmlWriterV1 {
             sb.append(HtmlEscaper.escape(e.missingJarHint!!))
             sb.append("</code></li>\n")
         }
+        if (e.targetModule != null || e.callerModule != null || e.packageName != null || e.exported != null) {
+            val target = e.targetModule ?: "(unnamed)"
+            val caller = e.callerModule ?: "(unnamed)"
+            sb.append("      <li><span class=\"k\">JPMS</span>: <code>")
+            sb.append(HtmlEscaper.escape("target=$target, caller=$caller"))
+            if (e.packageName != null) {
+                sb.append(HtmlEscaper.escape(", package=${e.packageName}"))
+            }
+            if (e.exported != null) {
+                sb.append(HtmlEscaper.escape(", exported=${e.exported}"))
+            }
+            sb.append("</code></li>\n")
+        }
         sb.append("    </ul>\n")
         return sb.toString()
     }

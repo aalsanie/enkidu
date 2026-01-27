@@ -33,8 +33,21 @@ data class ParsedClass(
     val interfaces: List<String>,
     val methods: Map<MemberSig, MemberDef>,
     val fields: Map<MemberSig, MemberDef>,
+    /** Java 11+ nest-based access control (best-effort, when present). */
+    val nestHostBinaryName: String?,
+    val nestMembersBinaryNames: Set<String>,
 ) {
     val isInterface: Boolean get() = (access and Opcodes.ACC_INTERFACE) != 0
+
+    fun isNestmateOf(otherBinaryName: String): Boolean {
+        val host = nestHostBinaryName ?: binaryName
+        if (otherBinaryName == binaryName) return true
+        // If we know our host and member set, treat any member listed (or the host itself) as a nestmate.
+        if (otherBinaryName == host) return true
+        if (nestMembersBinaryNames.contains(otherBinaryName)) return true
+        // If we are a member, the host is our nest. We can't reliably infer other members' hosts.
+        return false
+    }
 }
 
 data class MemberSig(
@@ -57,6 +70,8 @@ internal object ClassfileParser {
         val interfacesInternal = mutableListOf<String>()
         val methods = linkedMapOf<MemberSig, MemberDef>()
         val fields = linkedMapOf<MemberSig, MemberDef>()
+        var nestHostInternal: String? = null
+        val nestMembersInternal = linkedSetOf<String>()
 
         val cr = ClassReader(bytes)
         cr.accept(
@@ -99,6 +114,14 @@ internal object ClassfileParser {
                     methods[MemberSig(name, descriptor)] = MemberDef(access)
                     return null
                 }
+
+                override fun visitNestHost(nestHost: String) {
+                    nestHostInternal = nestHost
+                }
+
+                override fun visitNestMember(nestMember: String) {
+                    nestMembersInternal += nestMember
+                }
             },
             ClassReader.SKIP_CODE or ClassReader.SKIP_FRAMES or ClassReader.SKIP_DEBUG,
         )
@@ -111,6 +134,8 @@ internal object ClassfileParser {
             interfaces = interfacesInternal.map { EnkiduNames.internalToBinary(it) },
             methods = methods.toMap(),
             fields = fields.toMap(),
+            nestHostBinaryName = nestHostInternal?.let { EnkiduNames.internalToBinary(it) },
+            nestMembersBinaryNames = nestMembersInternal.map { EnkiduNames.internalToBinary(it) }.toSet(),
         )
     }
 }

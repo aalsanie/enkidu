@@ -170,6 +170,11 @@ data class Evidence(
     val winnerJar: String? = null,
     val shadowedJars: List<String> = emptyList(),
     val missingJarHint: String? = null,
+    /** JPMS context when available. */
+    val targetModule: String? = null,
+    val callerModule: String? = null,
+    val packageName: String? = null,
+    val exported: Boolean? = null,
 ) {
     fun canonical(): Evidence =
         copy(

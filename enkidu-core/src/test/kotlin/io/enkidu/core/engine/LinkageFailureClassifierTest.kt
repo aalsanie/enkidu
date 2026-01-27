@@ -21,7 +21,9 @@ package io.enkidu.core.engine
 import io.enkidu.artifacts.v1.FailureType
 import io.enkidu.artifacts.v1.SymbolKind
 import io.enkidu.core.model.ClasspathSnapshot
+import io.enkidu.core.resolve.AccessChecker
 import io.enkidu.core.resolve.JvmLinkageResolver
+import io.enkidu.core.resolve.ModuleIndex
 import io.enkidu.core.scan.BytecodeReferenceScanner
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -202,6 +204,77 @@ class LinkageFailureClassifierTest {
                 miss.message.contains("One-hop callers:"),
                 "expected one-hop callers summary when call graph provides callers",
             )
+        }
+    }
+
+    @Test
+    fun `illegal access is classified when runtime visibility becomes more restrictive`() {
+        // Compile-time API exposes public foo()V
+        val compileLibOut = Files.createTempDirectory("enkidu-e3-lib-compile")
+        val compileLibSrc = Files.createTempDirectory("enkidu-e3-lib-compile-src")
+        writeJava(
+            compileLibSrc.resolve("demo/lib/Lib.java"),
+            """
+            package demo.lib;
+
+            public class Lib {
+                public void foo() {}
+            }
+            """.trimIndent(),
+        )
+        compileJava(srcDir = compileLibSrc, outDir = compileLibOut)
+
+        // Caller compiles against the public API from a different package.
+        val callerOut = Files.createTempDirectory("enkidu-e3-caller")
+        val callerSrc = Files.createTempDirectory("enkidu-e3-caller-src")
+        writeJava(
+            callerSrc.resolve("demo/app/Caller.java"),
+            """
+            package demo.app;
+
+            import demo.lib.Lib;
+
+            public class Caller {
+                public void run(Lib lib) {
+                    lib.foo();
+                }
+            }
+            """.trimIndent(),
+        )
+        compileJava(srcDir = callerSrc, outDir = callerOut, classpath = listOf(compileLibOut))
+
+        // Runtime API keeps the method but drops visibility to package-private (no modifier).
+        // This should produce IllegalAccessError at runtime.
+        val runtimeOut = Files.createTempDirectory("enkidu-e3-runtime")
+        val runtimeSrc = Files.createTempDirectory("enkidu-e3-runtime-src")
+        writeJava(
+            runtimeSrc.resolve("demo/lib/Lib.java"),
+            """
+            package demo.lib;
+
+            public class Lib {
+                void foo() {}
+            }
+            """.trimIndent(),
+        )
+        compileJava(srcDir = runtimeSrc, outDir = runtimeOut)
+
+        val snapshot = ClasspathSnapshot.fromPaths(listOf(runtimeOut))
+        val refs = BytecodeReferenceScanner().scanClassBytes(callerOut.resolve("demo/app/Caller.class").readBytes())
+        val callGraph = CallGraphIndex.fromReferences(refs)
+
+        JvmLinkageResolver(snapshot).use { resolver ->
+            val accessChecker = AccessChecker(resolver = resolver, moduleIndex = ModuleIndex.build(snapshot))
+            val classifier = LinkageFailureClassifier(snapshot, accessChecker)
+            val failures = refs.mapNotNull { classifier.classify(it, resolver, callGraph) }
+
+            val illegal = failures.firstOrNull { it.type == FailureType.ILLEGAL_ACCESS_RISK }
+            assertNotNull(illegal, "expected an ILLEGAL_ACCESS_RISK failure")
+            assertTrue(
+                illegal.message.contains("not accessible"),
+                "expected an access explanation in the failure message",
+            )
+            assertEquals(runtimeOut.toString(), illegal.evidence?.winnerJar)
         }
     }
 

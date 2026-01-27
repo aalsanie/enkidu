@@ -28,6 +28,9 @@ import io.enkidu.artifacts.v1.SymbolKind
 import io.enkidu.core.fixplan.FixPlannerV1
 import io.enkidu.core.model.ClasspathSnapshot
 import io.enkidu.core.model.JarIndex
+import io.enkidu.core.resolve.AccessCheckResult
+import io.enkidu.core.resolve.AccessChecker
+import io.enkidu.core.resolve.ClassLocation
 import io.enkidu.core.resolve.ClassResolutionOutcome
 import io.enkidu.core.resolve.FieldResolutionOutcome
 import io.enkidu.core.resolve.JvmLinkageResolver
@@ -44,6 +47,7 @@ import io.enkidu.core.scan.BytecodeReference
  */
 class LinkageFailureClassifier(
     private val snapshot: ClasspathSnapshot,
+    private val accessChecker: AccessChecker? = null,
 ) {
     private val jarIndex: JarIndex = JarIndex.build(snapshot)
     private val fixPlanner: FixPlannerV1 = FixPlannerV1()
@@ -93,7 +97,28 @@ class LinkageFailureClassifier(
             )
 
         return when (outcome) {
-            is MethodResolutionOutcome.Resolved -> null
+            is MethodResolutionOutcome.Resolved -> {
+                val callerBinary = reference.site.callerClass.replace('/', '.')
+                val access =
+                    accessChecker?.checkMethodAccess(
+                        callerBinaryName = callerBinary,
+                        declaringClass = outcome.declaringClass,
+                        signature = outcome.signature,
+                    )
+                if (access == null) {
+                    null
+                } else {
+                    buildFailure(
+                        type = FailureType.ILLEGAL_ACCESS_RISK,
+                        severity = Severity.ERROR,
+                        message = "Illegal access: ${access.reason} (caller=$callerBinary, target=${access.targetBinaryName})",
+                        symbol = reference.symbol,
+                        reference = reference,
+                        evidence = evidenceForResolvedOwner(outcome.declaringClass, access),
+                        callGraph = callGraph,
+                    )
+                }
+            }
             is MethodResolutionOutcome.MissingClass ->
                 buildFailure(
                     type = FailureType.MISSING_CLASS,
@@ -148,7 +173,28 @@ class LinkageFailureClassifier(
     ): LinkageFailure? {
         val outcome = resolver.resolveField(reference.symbol, reference.opcode)
         return when (outcome) {
-            is FieldResolutionOutcome.Resolved -> null
+            is FieldResolutionOutcome.Resolved -> {
+                val callerBinary = reference.site.callerClass.replace('/', '.')
+                val access =
+                    accessChecker?.checkFieldAccess(
+                        callerBinaryName = callerBinary,
+                        declaringClass = outcome.declaringClass,
+                        signature = outcome.signature,
+                    )
+                if (access == null) {
+                    null
+                } else {
+                    buildFailure(
+                        type = FailureType.ILLEGAL_ACCESS_RISK,
+                        severity = Severity.ERROR,
+                        message = "Illegal access: ${access.reason} (caller=$callerBinary, target=${access.targetBinaryName})",
+                        symbol = reference.symbol,
+                        reference = reference,
+                        evidence = evidenceForResolvedOwner(outcome.declaringClass, access),
+                        callGraph = callGraph,
+                    )
+                }
+            }
             is FieldResolutionOutcome.MissingClass ->
                 buildFailure(
                     type = FailureType.MISSING_CLASS,
@@ -205,16 +251,20 @@ class LinkageFailureClassifier(
     ): Pair<FailureType, String> =
         if (sameNameDescriptors.isNotEmpty()) {
             val hints = sameNameDescriptors.sorted().joinToString(", ")
-            FailureType.DESCRIPTOR_MISMATCH to
-                "Referenced $kind $owner.$name$descriptor not found, but $owner.$name exists with other descriptors: [$hints]"
+            Pair(
+                FailureType.DESCRIPTOR_MISMATCH,
+                "Referenced $kind $owner.$name$descriptor not found, but $owner.$name exists with other descriptors: [$hints]",
+            )
         } else {
-            val msg =
+            val msg: String =
                 when (kind) {
                     "method" -> "Referenced method $owner.$name$descriptor not found on runtime type"
                     "field" -> "Referenced field $owner.$name:$descriptor not found on runtime type"
                     else -> "Referenced member $owner.$name$descriptor not found on runtime type"
                 }
-            (if (kind == "field") FailureType.MISSING_FIELD else FailureType.MISSING_METHOD) to msg
+
+            val t = if (kind == "field") FailureType.MISSING_FIELD else FailureType.MISSING_METHOD
+            Pair(t, msg)
         }
 
     private fun buildFailure(
@@ -264,6 +314,31 @@ class LinkageFailureClassifier(
             winnerJar = winner,
             shadowedJars = shadowed,
             missingJarHint = null,
+        )
+    }
+
+    private fun evidenceForResolvedOwner(
+        declaringClass: ClassLocation,
+        access: AccessCheckResult,
+    ): Evidence {
+        val locs = jarIndex.allLocationsOf(declaringClass.binaryName)
+        val winner = declaringClass.entryPath.toString()
+        val shadowed =
+            locs
+                .map { it.entryPath.toString() }
+                .filter { it != winner }
+                .distinct()
+                .sorted()
+
+        val module = access.moduleContext
+        return Evidence(
+            winnerJar = winner,
+            shadowedJars = shadowed,
+            missingJarHint = null,
+            targetModule = module?.targetModule,
+            callerModule = module?.callerModule,
+            packageName = module?.packageName,
+            exported = module?.exported,
         )
     }
 

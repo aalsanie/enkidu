@@ -86,6 +86,37 @@ class JvmLinkageResolver(
         val lookup = methodLookup(ownerParsed, signature, opcode)
         return when (lookup) {
             is LookupOutcome.Found -> {
+                // Static ↔ instance mismatch is a classic ICCE-class failure.
+                //
+                // - invokestatic requires a static method
+                // - invokevirtual/invokeinterface/invokespecial require a non-static method
+                val def = lookup.parsed.methods[signature]
+                if (def != null) {
+                    val expectsStatic = opcode == Opcodes.INVOKESTATIC
+                    val expectsInstance =
+                        opcode == Opcodes.INVOKEVIRTUAL ||
+                            opcode == Opcodes.INVOKEINTERFACE ||
+                            opcode == Opcodes.INVOKESPECIAL
+
+                    if (expectsStatic && !def.isStatic) {
+                        return MethodResolutionOutcome.IncompatibleClassChange(
+                            symbolOwner = owner,
+                            signature = signature,
+                            message =
+                                "invokestatic against instance method " +
+                                    "${lookup.location.binaryName}.${signature.name}${signature.descriptor}",
+                        )
+                    }
+                    if (expectsInstance && def.isStatic) {
+                        return MethodResolutionOutcome.IncompatibleClassChange(
+                            symbolOwner = owner,
+                            signature = signature,
+                            message =
+                                "${opcodeName(opcode)} against static method " +
+                                    "${lookup.location.binaryName}.${signature.name}${signature.descriptor}",
+                        )
+                    }
+                }
                 MethodResolutionOutcome.Resolved(
                     symbolOwner = owner,
                     declaringClass = lookup.location,

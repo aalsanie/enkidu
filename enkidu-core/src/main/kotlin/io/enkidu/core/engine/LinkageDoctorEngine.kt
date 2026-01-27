@@ -31,7 +31,9 @@ import io.enkidu.artifacts.v1.ReportSummary
 import io.enkidu.artifacts.v1.WinnerChange
 import io.enkidu.core.model.ClasspathSnapshot
 import io.enkidu.core.model.JarIndex
+import io.enkidu.core.resolve.AccessChecker
 import io.enkidu.core.resolve.JvmLinkageResolver
+import io.enkidu.core.resolve.ModuleIndex
 import io.enkidu.core.scan.BytecodeReference
 import io.enkidu.core.scan.TargetReferenceScanner
 import java.nio.file.Path
@@ -52,12 +54,14 @@ class LinkageDoctorEngine(
         require(request.runtimeClasspath.isNotEmpty()) { "runtimeClasspath must not be empty." }
 
         val snapshot = ClasspathSnapshot.fromPaths(request.runtimeClasspath)
+        val moduleIndex = ModuleIndex.build(snapshot)
         val references: List<BytecodeReference> = targetScanner.scanTargets(request.targets)
 
         val callGraph = CallGraphIndex.fromReferences(references)
         val failures =
             JvmLinkageResolver(snapshot).use { resolver ->
-                val classifier = LinkageFailureClassifier(snapshot)
+                val accessChecker = AccessChecker(resolver = resolver, moduleIndex = moduleIndex)
+                val classifier = LinkageFailureClassifier(snapshot, accessChecker)
                 references.mapNotNull { classifier.classify(it, resolver, callGraph) }
             }
 
@@ -187,14 +191,13 @@ class LinkageDoctorEngine(
         val sym = f.symbol
 
         val owner = sym?.owner.orEmpty()
+        val kind = sym?.kind?.name.orEmpty()
         val name = sym?.name.orEmpty()
         val desc = sym?.descriptor.orEmpty()
 
         // A stable identity that survives evidence/fix-plan differences.
         return buildString {
             append(f.type.name)
-            append('|')
-            append(f.severity.name)
             append('|')
             append(site.callerClass)
             append('|')
@@ -208,11 +211,11 @@ class LinkageDoctorEngine(
             append('|')
             append(owner)
             append('|')
+            append(kind)
+            append('|')
             append(name)
             append('|')
             append(desc)
-            append('|')
-            append(f.message)
         }
     }
 

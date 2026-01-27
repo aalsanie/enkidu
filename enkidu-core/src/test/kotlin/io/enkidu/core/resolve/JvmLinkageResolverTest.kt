@@ -159,6 +159,68 @@ class JvmLinkageResolverTest {
         }
     }
 
+    @Test
+    fun `static vs instance method mismatch is detected for invokestatic`() {
+        val outDir = Files.createTempDirectory("enkidu-resolve-mstatic")
+        val srcDir = Files.createTempDirectory("enkidu-resolve-mstatic-src")
+
+        writeJava(
+            srcDir.resolve("demo/Lib.java"),
+            """
+            package demo;
+
+            public class Lib {
+                public String foo() { return "ok"; }
+            }
+            """.trimIndent(),
+        )
+        compileJava(srcDir, outDir)
+
+        val snapshot = ClasspathSnapshot.fromPaths(listOf(outDir))
+
+        JvmLinkageResolver(snapshot).use { resolver ->
+            val outcome =
+                resolver.resolveMethod(
+                    symbol = SymbolId(owner = "demo.Lib", kind = SymbolKind.METHOD, name = "foo", descriptor = "()Ljava/lang/String;"),
+                    opcode = Opcodes.INVOKESTATIC,
+                    isInterfaceInvocation = false,
+                )
+
+            assertTrue(outcome is MethodResolutionOutcome.IncompatibleClassChange)
+        }
+    }
+
+    @Test
+    fun `static vs instance method mismatch is detected for invokevirtual`() {
+        val outDir = Files.createTempDirectory("enkidu-resolve-minstance")
+        val srcDir = Files.createTempDirectory("enkidu-resolve-minstance-src")
+
+        writeJava(
+            srcDir.resolve("demo/Lib.java"),
+            """
+            package demo;
+
+            public class Lib {
+                public static String foo() { return "ok"; }
+            }
+            """.trimIndent(),
+        )
+        compileJava(srcDir, outDir)
+
+        val snapshot = ClasspathSnapshot.fromPaths(listOf(outDir))
+
+        JvmLinkageResolver(snapshot).use { resolver ->
+            val outcome =
+                resolver.resolveMethod(
+                    symbol = SymbolId(owner = "demo.Lib", kind = SymbolKind.METHOD, name = "foo", descriptor = "()Ljava/lang/String;"),
+                    opcode = Opcodes.INVOKEVIRTUAL,
+                    isInterfaceInvocation = false,
+                )
+
+            assertTrue(outcome is MethodResolutionOutcome.IncompatibleClassChange)
+        }
+    }
+
     private fun writeJava(
         path: Path,
         content: String,

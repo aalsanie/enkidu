@@ -1,3 +1,4 @@
+import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
@@ -32,9 +33,12 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:5.11.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
+    testImplementation("junit:junit:4.13.2")
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.11.0")
 
     intellijPlatform {
         create("IC", "2024.2.5")
+        testFramework(TestFrameworkType.Platform)
 
         // com.intellij.java is bundled with IntelliJ. Using bundledPlugin avoids the "version required" error.
         bundledPlugin("com.intellij.java")

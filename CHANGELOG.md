@@ -3,6 +3,17 @@
 
 ## [unreleased]
 
+### Added
+- Added access checker
+- Added IntelliJ plugin UI wiring test
+
+### Fixed
+- Detect (static, instance) mismatches for both methods and fields
+
+### Removed
+- Removed severity and message from the key and included symbol kind
+
+
 ## [0.1.1]
 ### Added
 - ASM dependency to enkidu-core to support bytecode reference extraction
