@@ -1,4 +1,4 @@
-<p align="center">
+<p align="left">
   <img src="./enkidu-intellij-plugin/src/main/resources/icons/logo.png" alt="Shamash Logo" width="180"/>
 </p>
 
