@@ -1,0 +1,228 @@
+{
+  "failures": [
+    {
+      "evidence": {
+        "missingJarHint": "Not present on runtime classpath",
+        "shadowedJars": [ ]
+      },
+      "fixPlan": [
+        {
+          "confidence": 0.85,
+          "kind": "ADD_MISSING_DEPENDENCY",
+          "value": "java.lang.Object"
+        }
+      ],
+      "message": "Referenced class java/lang/Object not present on runtime classpath | Callsite: demo/app/Main.<init>()V (line 15)",
+      "referenceSite": {
+        "bytecodeOffset": 0,
+        "callerClass": "demo/app/Main",
+        "callerDescriptor": "()V",
+        "callerMethod": "<init>",
+        "line": 15
+      },
+      "severity": "ERROR",
+      "symbol": {
+        "descriptor": "()V",
+        "kind": "METHOD",
+        "name": "<init>",
+        "owner": "java/lang/Object"
+      },
+      "type": "MISSING_CLASS"
+    },
+    {
+      "evidence": {
+        "missingJarHint": "Not present on runtime classpath",
+        "shadowedJars": [ ]
+      },
+      "fixPlan": [
+        {
+          "confidence": 0.85,
+          "kind": "ADD_MISSING_DEPENDENCY",
+          "value": "java.util.ServiceLoader"
+        }
+      ],
+      "message": "Referenced class java/util/ServiceLoader not present on runtime classpath | Callsite: demo/app/Main.main([Ljava/lang/String;)V (line 24)",
+      "referenceSite": {
+        "bytecodeOffset": 4,
+        "callerClass": "demo/app/Main",
+        "callerDescriptor": "([Ljava/lang/String;)V",
+        "callerMethod": "main",
+        "line": 24
+      },
+      "severity": "ERROR",
+      "symbol": {
+        "descriptor": "(Ljava/lang/Class;)Ljava/util/ServiceLoader;",
+        "kind": "METHOD",
+        "name": "load",
+        "owner": "java/util/ServiceLoader"
+      },
+      "type": "MISSING_CLASS"
+    },
+    {
+      "evidence": {
+        "missingJarHint": "Not present on runtime classpath",
+        "shadowedJars": [ ]
+      },
+      "fixPlan": [
+        {
+          "confidence": 0.85,
+          "kind": "ADD_MISSING_DEPENDENCY",
+          "value": "java.util.ServiceLoader"
+        }
+      ],
+      "message": "Referenced class java/util/ServiceLoader not present on runtime classpath | Callsite: demo/app/Main.main([Ljava/lang/String;)V (line 24)",
+      "referenceSite": {
+        "bytecodeOffset": 5,
+        "callerClass": "demo/app/Main",
+        "callerDescriptor": "([Ljava/lang/String;)V",
+        "callerMethod": "main",
+        "line": 24
+      },
+      "severity": "ERROR",
+      "symbol": {
+        "descriptor": "()Ljava/util/Iterator;",
+        "kind": "METHOD",
+        "name": "iterator",
+        "owner": "java/util/ServiceLoader"
+      },
+      "type": "MISSING_CLASS"
+    },
+    {
+      "evidence": {
+        "missingJarHint": "Not present on runtime classpath",
+        "shadowedJars": [ ]
+      },
+      "fixPlan": [
+        {
+          "confidence": 0.85,
+          "kind": "ADD_MISSING_DEPENDENCY",
+          "value": "java.util.Iterator"
+        }
+      ],
+      "message": "Referenced class java/util/Iterator not present on runtime classpath | Callsite: demo/app/Main.main([Ljava/lang/String;)V (line 24)",
+      "referenceSite": {
+        "bytecodeOffset": 6,
+        "callerClass": "demo/app/Main",
+        "callerDescriptor": "([Ljava/lang/String;)V",
+        "callerMethod": "main",
+        "line": 24
+      },
+      "severity": "ERROR",
+      "symbol": {
+        "descriptor": "()Z",
+        "kind": "METHOD",
+        "name": "hasNext",
+        "owner": "java/util/Iterator"
+      },
+      "type": "MISSING_CLASS"
+    },
+    {
+      "evidence": {
+        "missingJarHint": "Not present on runtime classpath",
+        "shadowedJars": [ ]
+      },
+      "fixPlan": [
+        {
+          "confidence": 0.85,
+          "kind": "ADD_MISSING_DEPENDENCY",
+          "value": "java.util.Iterator"
+        }
+      ],
+      "message": "Referenced class java/util/Iterator not present on runtime classpath | Callsite: demo/app/Main.main([Ljava/lang/String;)V (line 24)",
+      "referenceSite": {
+        "bytecodeOffset": 7,
+        "callerClass": "demo/app/Main",
+        "callerDescriptor": "([Ljava/lang/String;)V",
+        "callerMethod": "main",
+        "line": 24
+      },
+      "severity": "ERROR",
+      "symbol": {
+        "descriptor": "()Ljava/lang/Object;",
+        "kind": "METHOD",
+        "name": "next",
+        "owner": "java/util/Iterator"
+      },
+      "type": "MISSING_CLASS"
+    },
+    {
+      "evidence": {
+        "missingJarHint": "Not present on runtime classpath",
+        "shadowedJars": [ ]
+      },
+      "fixPlan": [
+        {
+          "confidence": 0.85,
+          "kind": "ADD_MISSING_DEPENDENCY",
+          "value": "java.lang.System"
+        }
+      ],
+      "message": "Referenced class java/lang/System not present on runtime classpath | Callsite: demo/app/Main.main([Ljava/lang/String;)V (line 25)",
+      "referenceSite": {
+        "bytecodeOffset": 9,
+        "callerClass": "demo/app/Main",
+        "callerDescriptor": "([Ljava/lang/String;)V",
+        "callerMethod": "main",
+        "line": 25
+      },
+      "severity": "ERROR",
+      "symbol": {
+        "descriptor": "Ljava/io/PrintStream;",
+        "kind": "FIELD",
+        "name": "out",
+        "owner": "java/lang/System"
+      },
+      "type": "MISSING_CLASS"
+    },
+    {
+      "evidence": {
+        "missingJarHint": "Not present on runtime classpath",
+        "shadowedJars": [ ]
+      },
+      "fixPlan": [
+        {
+          "confidence": 0.85,
+          "kind": "ADD_MISSING_DEPENDENCY",
+          "value": "java.io.PrintStream"
+        }
+      ],
+      "message": "Referenced class java/io/PrintStream not present on runtime classpath | Callsite: demo/app/Main.main([Ljava/lang/String;)V (line 25)",
+      "referenceSite": {
+        "bytecodeOffset": 12,
+        "callerClass": "demo/app/Main",
+        "callerDescriptor": "([Ljava/lang/String;)V",
+        "callerMethod": "main",
+        "line": 25
+      },
+      "severity": "ERROR",
+      "symbol": {
+        "descriptor": "(Ljava/lang/String;)V",
+        "kind": "METHOD",
+        "name": "println",
+        "owner": "java/io/PrintStream"
+      },
+      "type": "MISSING_CLASS"
+    }
+  ],
+  "fingerprints": {
+    "classpath": {
+      "algorithm": "SHA-256",
+      "value": "2daceb2b8d7db27d476404ec37d81e20854fbee28f67d516fdc7b1f2456d1481"
+    },
+    "targets": {
+      "algorithm": "SHA-256",
+      "value": "cb8d5b052591cedb9ba5351a05c860bf62f11d902bbf11c550bff27790879f9b"
+    }
+  },
+  "summary": {
+    "failureCount": 7,
+    "failureCountByType": {
+      "MISSING_CLASS": 7
+    }
+  },
+  "tool": {
+    "name": "enkidu-linkage-doctor",
+    "resolverMode": "jvm-linkage-sim-v1",
+    "version": "dev"
+  }
+}

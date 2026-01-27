@@ -32,9 +32,11 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.CompilerModuleExtension
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
+import com.intellij.openapi.util.Disposer
 import com.intellij.pom.Navigatable
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.serviceContainer.AlreadyDisposedException
 import com.intellij.ui.JBSplitter
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SimpleListCellRenderer
@@ -65,6 +67,7 @@ import java.awt.Dimension
 import java.awt.datatransfer.StringSelection
 import java.nio.file.Files
 import java.nio.file.Path
+import javax.swing.DefaultComboBoxModel
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -88,9 +91,10 @@ class LinkageDoctorToolWindowPanel(
     private val settingsService: LinkageDoctorSettingsService = LinkageDoctorSettingsService.get(project)
 
     // ----- Config controls -----
-    private val moduleCombo: ComboBox<Module>
+    private val moduleCombo: ComboBox<String>
+    private val reloadModulesButton: JButton
     private val classpathProviderCombo: ComboBox<ClasspathProvider>
-    private val classpathProviderHelp: JBLabel
+    private val classpathProviderHelp: JBTextArea
     private val classpathManifestField: TextFieldWithBrowseButton
     private val manifestDescriptor: FileChooserDescriptor
     private val formatCombo: ComboBox<OutputFormat>
@@ -119,18 +123,27 @@ class LinkageDoctorToolWindowPanel(
     private var lastClasspathManifest: String? = null
 
     init {
-        val modules = ModuleManager.getInstance(project).modules.sortedBy { it.name }
-        moduleCombo = ComboBox(modules.toTypedArray())
-        moduleCombo.minimumSize = Dimension(JBUI.scale(180), moduleCombo.preferredSize.height)
-        moduleCombo.renderer = SimpleListCellRenderer.create("") { it?.name ?: "" }
+        reloadModulesButton = JButton("Reload")
+
+        moduleCombo = ComboBox(emptyArray())
+        moduleCombo.minimumSize = Dimension(JBUI.scale(220), moduleCombo.preferredSize.height)
+        moduleCombo.renderer = SimpleListCellRenderer.create("") { it ?: "" }
+        reloadModules(preserveSelection = null)
 
         val providers = ClasspathProviders.all().toTypedArray()
         classpathProviderCombo = ComboBox(providers)
         classpathProviderCombo.minimumSize = Dimension(JBUI.scale(220), classpathProviderCombo.preferredSize.height)
         classpathProviderCombo.renderer = SimpleListCellRenderer.create("") { it?.displayName ?: "" }
 
-        classpathProviderHelp = JBLabel()
-        classpathProviderHelp.foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+        classpathProviderHelp =
+            JBTextArea().apply {
+                isEditable = false
+                isOpaque = false
+                lineWrap = true
+                wrapStyleWord = true
+                foreground = JBUI.CurrentTheme.ContextHelp.FOREGROUND
+                border = JBUI.Borders.empty(2, 0)
+            }
 
         classpathManifestField = TextFieldWithBrowseButton()
         classpathManifestField.text = settingsService.settings.classpathManifestPath.orEmpty()
@@ -140,6 +153,14 @@ class LinkageDoctorToolWindowPanel(
                 .createSingleFileDescriptor()
                 .withTitle("Select Classpath Manifest")
                 .withDescription("Select a manifest file that contains one classpath entry per line.")
+
+        // Wire browse action in a deterministic, no-magic way.
+        classpathManifestField.addBrowseFolderListener(
+            "Select Classpath Manifest",
+            "Select a manifest file that contains one classpath entry per line.",
+            project,
+            manifestDescriptor,
+        )
 
         formatCombo = ComboBox(OutputFormat.entries.toTypedArray())
         formatCombo.selectedItem = settingsService.settings.outputFormat
@@ -234,6 +255,7 @@ class LinkageDoctorToolWindowPanel(
             group("Target") {
                 row("Module") {
                     cell(moduleCombo).align(AlignX.FILL)
+                    cell(reloadModulesButton)
                 }
                 row {
                     comment("Tip: Build the project first so compiler output exists.")
@@ -332,6 +354,10 @@ class LinkageDoctorToolWindowPanel(
         }
 
     private fun wireActions() {
+        reloadModulesButton.addActionListener {
+            reloadModules(preserveSelection = moduleCombo.selectedItem as? String)
+        }
+
         classpathProviderCombo.addActionListener {
             updateClasspathProviderHelp()
             applyClasspathUiState()
@@ -426,8 +452,7 @@ class LinkageDoctorToolWindowPanel(
 
     private fun updateClasspathProviderHelp() {
         val provider = (classpathProviderCombo.selectedItem as? ClasspathProvider) ?: ClasspathProviders.default()
-        // JBLabel wraps only with HTML.
-        classpathProviderHelp.text = "<html>${provider.description}</html>"
+        classpathProviderHelp.text = provider.description
     }
 
     private fun applyClasspathUiState() {
@@ -445,15 +470,27 @@ class LinkageDoctorToolWindowPanel(
     }
 
     private fun runScan() {
-        val module = moduleCombo.selectedItem as? Module
+        val selectedName = (moduleCombo.selectedItem as? String)?.trim().orEmpty()
+        val module = resolveLiveModuleByName(selectedName)
         if (module == null) {
-            notify("Invalid input", "No module selected.", NotificationType.ERROR)
+            val msg =
+                if (selectedName.isBlank()) {
+                    "No module selected. Click 'Reload' and pick a module that has compiler output."
+                } else {
+                    "Module '$selectedName' is not available (it may have been reloaded/disposed). Click 'Reload' and reselect."
+                }
+            notify("Invalid input", msg, NotificationType.ERROR)
             return
         }
 
         val outPath = compilerOutputPath(module)
         if (outPath == null) {
-            notify("No compiler output", "Module '${module.name}' has no configured compiler output path.", NotificationType.WARNING)
+            notify(
+                "No compiler output",
+                "Module '${module.name}' has no configured compiler output path. " +
+                    "If you just re-imported Gradle, try reloading the project and re-running.",
+                NotificationType.WARNING,
+            )
             return
         }
 
@@ -520,6 +557,53 @@ class LinkageDoctorToolWindowPanel(
                 notify("Scan failed", error.message ?: error.toString(), NotificationType.ERROR)
             }
         }.queue()
+    }
+
+    /**
+     * IntelliJ can dispose/recreate modules during Gradle re-imports or project model refresh.
+     * Holding onto the old [Module] instance (e.g. via a combo box) can throw [AlreadyDisposedException]
+     * when queried. Resolve a fresh module instance by name right before use.
+     */
+    private fun resolveLiveModule(selected: Module?): Module? {
+        if (selected == null) return null
+
+        // If the combo item is already disposed, we must resolve a fresh instance.
+        val name =
+            try {
+                selected.name
+            } catch (_: AlreadyDisposedException) {
+                return null
+            }
+
+        val live = ModuleManager.getInstance(project).findModuleByName(name) ?: return null
+        if (Disposer.isDisposed(live)) return null
+        return live
+    }
+
+    private fun resolveLiveModuleByName(moduleName: String): Module? {
+        if (moduleName.isBlank()) return null
+        val live = ModuleManager.getInstance(project).findModuleByName(moduleName) ?: return null
+        if (Disposer.isDisposed(live)) return null
+        return live
+    }
+
+    private fun reloadModules(preserveSelection: String? = null) {
+        val names =
+            ModuleManager
+                .getInstance(project)
+                .modules
+                .filterNot { Disposer.isDisposed(it) }
+                .map { it.name }
+                .distinct()
+                .sorted()
+
+        moduleCombo.model = DefaultComboBoxModel(names.toTypedArray())
+        moduleCombo.isEnabled = names.isNotEmpty()
+
+        val selected = preserveSelection?.takeIf { it in names } ?: names.firstOrNull()
+        if (selected != null) {
+            moduleCombo.selectedItem = selected
+        }
     }
 
     private fun exportLastReport() {
@@ -659,9 +743,14 @@ class LinkageDoctorToolWindowPanel(
     }
 
     private fun compilerOutputPath(module: Module): Path? {
-        val ext = CompilerModuleExtension.getInstance(module) ?: return null
-        val vf = ext.compilerOutputPath ?: return null
-        return Path.of(vf.path)
+        if (Disposer.isDisposed(module)) return null
+        return try {
+            val ext = CompilerModuleExtension.getInstance(module) ?: return null
+            val vf = ext.compilerOutputPath ?: return null
+            Path.of(vf.path)
+        } catch (_: AlreadyDisposedException) {
+            null
+        }
     }
 
     private fun updateStatus(report: LinkageReport) {

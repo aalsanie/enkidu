@@ -3,6 +3,7 @@
 
 ## [unreleased]
 
+## [0.2.0]
 ### Added
 - Added access checker
 - Added IntelliJ plugin UI wiring test

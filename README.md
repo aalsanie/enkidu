@@ -2,7 +2,7 @@
   <img src="./enkidu-intellij-plugin/src/main/resources/icons/logo.png" alt="Shamash Logo" width="180"/>
 </p>
 
-[![current release](https://img.shields.io/badge/release-0.1.1-green)](https://github.com/aalsanie/enkidu/releases) | [![install plugin](https://img.shields.io/badge/jetbrains-plugin-blue)](https://plugins.jetbrains.com/plugin/29920-enkidu-linkage-doctor) | [![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
+[![current release](https://img.shields.io/badge/release-0.2.0-green)](https://github.com/aalsanie/enkidu/releases) | [![install plugin](https://img.shields.io/badge/jetbrains-plugin-blue)](https://plugins.jetbrains.com/plugin/29920-enkidu-linkage-doctor) | [![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 
 # Enkidu
 
