@@ -701,6 +701,31 @@ class LinkageDoctorToolWindowPanel(
                 evidence.shadowedJars.forEach { sb.appendLine("    - $it") }
             }
             if (evidence.missingJarHint != null) sb.appendLine("  missing: ${evidence.missingJarHint}")
+            if (evidence.spi != null) {
+                val s = evidence.spi!!
+                sb.appendLine("SPI")
+                sb.appendLine("  service: ${s.service}")
+                if (s.provider != null) sb.appendLine("  provider: ${s.provider}")
+                if (s.providerEntry != null) sb.appendLine("  providerEntry: ${s.providerEntry}")
+                if (s.serviceFileEntries.isNotEmpty()) {
+                    sb.appendLine("  serviceFiles:")
+                    s.serviceFileEntries.forEach { sb.appendLine("    - $it") }
+                }
+            }
+            if (evidence.duplicate != null) {
+                val d = evidence.duplicate!!
+                sb.appendLine("Duplicate")
+                sb.appendLine("  class: ${d.className}")
+                sb.appendLine("  risk: ${d.riskLevel} (${d.riskScore}/100)")
+                sb.appendLine("  identicalBytecode: ${d.identicalBytecode}")
+                if (d.abiDifferences.isNotEmpty()) {
+                    sb.appendLine("  abiDiffs:")
+                    d.abiDifferences.take(10).forEach { diff ->
+                        sb.appendLine("    - ${diff.kind}: ${diff.member ?: diff.detail ?: "(n/a)"} @ ${diff.entry}")
+                    }
+                    if (d.abiDifferences.size > 10) sb.appendLine("    - +${d.abiDifferences.size - 10} more")
+                }
+            }
             sb.appendLine()
         }
 

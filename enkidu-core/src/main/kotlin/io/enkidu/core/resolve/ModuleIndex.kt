@@ -148,7 +148,6 @@ data class ModuleInfo(
         if (isAutomatic) return true
         val export = exports[packageName] ?: return false
         // Unqualified export
-        if (export == null) return true
         // Qualified export to a set of modules
         if (toModule == null) return false
         return export.contains(toModule)

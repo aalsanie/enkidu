@@ -57,12 +57,28 @@ class LinkageDoctorEngine(
         val moduleIndex = ModuleIndex.build(snapshot)
         val references: List<BytecodeReference> = targetScanner.scanTargets(request.targets)
 
+        val referencedBinaryClasses: Set<String> =
+            references.map { it.symbol.owner.replace('/', '.') }.toSet()
+
+        val jarIndex = JarIndex.build(snapshot)
+
         val callGraph = CallGraphIndex.fromReferences(references)
         val failures =
             JvmLinkageResolver(snapshot).use { resolver ->
                 val accessChecker = AccessChecker(resolver = resolver, moduleIndex = moduleIndex)
-                val classifier = LinkageFailureClassifier(snapshot, accessChecker)
-                references.mapNotNull { classifier.classify(it, resolver, callGraph) }
+                val classifier = LinkageFailureClassifier(snapshot, accessChecker, jarIndex)
+
+                val linkageFailures = references.mapNotNull { classifier.classify(it, resolver, callGraph) }
+                val spiFailures =
+                    io.enkidu.core.spi
+                        .SpiValidator(snapshot)
+                        .validate(resolver)
+                val duplicateFailures =
+                    io.enkidu.core.dup
+                        .DuplicateImpactAnalyzer(jarIndex)
+                        .analyze(referencedBinaryClasses)
+
+                (linkageFailures + spiFailures + duplicateFailures).sortedWith(LinkageFailure.CANONICAL_ORDER)
             }
 
         val report =

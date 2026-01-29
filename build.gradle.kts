@@ -13,6 +13,16 @@ allprojects {
 }
 
 subprojects {
+  plugins.withId("org.jetbrains.kotlin.jvm") {
+    the<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>().jvmToolchain(21)
+  }
+
+  plugins.withType<JavaPlugin> {
+    the<JavaPluginExtension>().toolchain {
+      languageVersion.set(JavaLanguageVersion.of(21))
+    }
+  }
+
   apply(plugin = "com.diffplug.spotless")
 
   extensions.configure<com.diffplug.gradle.spotless.SpotlessExtension> {
