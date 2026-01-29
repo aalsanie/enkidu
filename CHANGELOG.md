@@ -3,12 +3,18 @@
 
 ## [unreleased]
 
+### Added
+- ServiceLoader/SPI validation: detects broken `META-INF/services/*` entries (missing provider/service, type mismatch, non-instantiable providers) and flags packaging overwrite/merge risks.
+- Duplicate-class impact analysis: compares winner vs shadowed copies via bytecode hash + public ABI shape, scores shadowing risk, and highlights dangerous duplicates vs benign identical copies.
+- Report evidence extended to include SPI and duplicate-risk details across JSON, SARIF, HTML, and IntelliJ UI.
+- New fixtures and tests reproducing common SPI failures and duplicate-risk cases.
+
 ## [0.2.0]
 ### Added
 - Added access checker
 - Added IntelliJ plugin UI wiring test
 
-### Fixed
+### FixedK
 - Detect (static, instance) mismatches for both methods and fields
 
 ### Removed

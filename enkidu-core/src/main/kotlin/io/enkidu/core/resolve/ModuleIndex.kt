@@ -146,10 +146,16 @@ data class ModuleInfo(
         toModule: String?,
     ): Boolean {
         if (isAutomatic) return true
-        val export = exports[packageName] ?: return false
-        // Unqualified export
-        if (export == null) return true
-        // Qualified export to a set of modules
+
+        // exports map uses null value to represent an *unqualified* export.
+        // so we must distinguish "key missing" from "key present with null value".
+        if (!exports.containsKey(packageName)) return false
+
+        val export = exports[packageName] ?: return true
+
+        // Unqualified export (common case): exported to everyone
+
+        // Qualified export: exported only to listed modules
         if (toModule == null) return false
         return export.contains(toModule)
     }

@@ -249,6 +249,36 @@ internal object HtmlWriterV1 {
             }
             sb.append("</code></li>\n")
         }
+        if (e.spi != null) {
+            val s = e.spi!!
+            sb.append("      <li><span class=\"k\">SPI</span>: <code>")
+            sb.append(HtmlEscaper.escape("service=${s.service}"))
+            if (s.provider != null) sb.append(HtmlEscaper.escape(", provider=${s.provider}"))
+            if (s.providerEntry != null) sb.append(HtmlEscaper.escape(", providerEntry=${s.providerEntry}"))
+            if (s.serviceFileEntries.isNotEmpty()) {
+                sb.append(
+                    HtmlEscaper.escape(", serviceFiles=" + s.serviceFileEntries.joinToString(" | ")),
+                )
+            }
+            sb.append("</code></li>\n")
+        }
+        if (e.duplicate != null) {
+            val d = e.duplicate!!
+            sb.append("      <li><span class=\"k\">Duplicate</span>: <code>")
+            sb.append(HtmlEscaper.escape("class=${d.className}, risk=${d.riskLevel}(${d.riskScore}/100), identical=${d.identicalBytecode}"))
+            sb.append("</code></li>\n")
+            if (d.abiDifferences.isNotEmpty()) {
+                sb.append("      <li><span class=\"k\">ABI diffs</span>: <code>")
+                val shown =
+                    d.abiDifferences.take(8).map {
+                        val what = it.member ?: it.detail ?: "(n/a)"
+                        "${it.kind}:$what@${it.entry}"
+                    }
+                sb.append(HtmlEscaper.escape(shown.joinToString(separator = " | ")))
+                if (d.abiDifferences.size > 8) sb.append(HtmlEscaper.escape(" | +${d.abiDifferences.size - 8} more"))
+                sb.append("</code></li>\n")
+            }
+        }
         sb.append("    </ul>\n")
         return sb.toString()
     }

@@ -21,7 +21,7 @@ package io.enkidu.artifacts.v1
 import com.fasterxml.jackson.annotation.JsonInclude
 
 /**
- * Versioned DTO contract for Enkido Linkage Doctor.
+ * Versioned DTO contract for Enkidu Linkage Doctor.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class LinkageReport(
@@ -30,7 +30,7 @@ data class LinkageReport(
     val summary: ReportSummary,
     val failures: List<LinkageFailure>,
 ) {
-    /** Returns a canonicalized copy suitable for deterministic JSON output. */
+    /** Returns a canonicalized copy suitable for JSON output. */
     fun canonical(): LinkageReport =
         copy(
             failures =
@@ -175,12 +175,80 @@ data class Evidence(
     val callerModule: String? = null,
     val packageName: String? = null,
     val exported: Boolean? = null,
+    /** Optional SPI context when the failure is ServiceLoader-related. */
+    val spi: SpiEvidence? = null,
+    /** Optional duplicate-class analysis when the failure is classpath-shadowing related. */
+    val duplicate: DuplicateEvidence? = null,
 ) {
     fun canonical(): Evidence =
         copy(
             shadowedJars = shadowedJars.sorted(),
+            spi = spi?.canonical(),
+            duplicate = duplicate?.canonical(),
         )
 }
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class SpiEvidence(
+    /** Binary name, e.g. "com.example.Service" */
+    val service: String,
+    /** Binary name, e.g. "com.example.impl.ServiceImpl" */
+    val provider: String? = null,
+    /** Classpath entries (jar/dir paths) that define META-INF/services/<service> in resolution order. */
+    val serviceFileEntries: List<String> = emptyList(),
+    /** Classpath entry where the provider class was resolved from (winner), when present. */
+    val providerEntry: String? = null,
+) {
+    fun canonical(): SpiEvidence =
+        copy(
+            serviceFileEntries = serviceFileEntries.sorted(),
+        )
+}
+
+enum class DuplicateRiskLevel { BENIGN, LOW, MEDIUM, HIGH, CRITICAL }
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class DuplicateEvidence(
+    /** Binary name, e.g. "com.example.Foo" */
+    val className: String,
+    /** True when all bytecode blobs are identical (sha256 match). */
+    val identicalBytecode: Boolean,
+    /** Deterministic 0..100 score. */
+    val riskScore: Int,
+    val riskLevel: DuplicateRiskLevel,
+    /** sha256 per classpath entry path. */
+    val hashes: List<JarHash> = emptyList(),
+    /** ABI differences between winner and each shadowed copy (public surface only). */
+    val abiDifferences: List<DuplicateAbiDifference> = emptyList(),
+) {
+    fun canonical(): DuplicateEvidence =
+        copy(
+            hashes = hashes.sortedWith(compareBy<JarHash> { it.entry }.thenBy { it.sha256 }),
+            abiDifferences =
+                abiDifferences.sortedWith(
+                    compareBy<DuplicateAbiDifference> { it.entry }.thenBy { it.kind }.thenBy { it.member },
+                ),
+        )
+}
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class JarHash(
+    val entry: String,
+    val sha256: String,
+)
+
+enum class DuplicateAbiDiffKind { SUPER_CHANGED, INTERFACES_CHANGED, METHOD_ADDED, METHOD_REMOVED, FIELD_ADDED, FIELD_REMOVED }
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class DuplicateAbiDifference(
+    /** Shadowed entry path (jar/dir) that differs from winner. */
+    val entry: String,
+    val kind: DuplicateAbiDiffKind,
+    /** Member signature for method/field diffs (name+descriptor). For type-level diffs, this is null. */
+    val member: String? = null,
+    /** Detail string for type-level diffs. */
+    val detail: String? = null,
+)
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class FixPlanItem(

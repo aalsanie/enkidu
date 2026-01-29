@@ -40,7 +40,6 @@ import io.enkidu.core.scan.BytecodeReference
 /**
  * Maps raw resolver outcomes into user-facing [LinkageFailure]s with evidence.
  *
- * Scope (Milestone E):
  * - classify failures (missing symbols, descriptor mismatch hints, ICCE-style mismatches)
  * - attach jar winner/shadowing evidence when available
  * - enrich messages with a best-effort call-chain summary (direct callsite + optional one-hop callers)
@@ -48,8 +47,8 @@ import io.enkidu.core.scan.BytecodeReference
 class LinkageFailureClassifier(
     private val snapshot: ClasspathSnapshot,
     private val accessChecker: AccessChecker? = null,
+    private val jarIndex: JarIndex = JarIndex.build(snapshot),
 ) {
-    private val jarIndex: JarIndex = JarIndex.build(snapshot)
     private val fixPlanner: FixPlannerV1 = FixPlannerV1()
 
     fun classify(
