@@ -21,6 +21,7 @@ package io.enkidu.cli
 import io.enkidu.artifacts.v1.ToolMetadata
 import io.enkidu.core.engine.LinkageDoctorCompareRequest
 import io.enkidu.core.engine.LinkageDoctorEngine
+import io.enkidu.core.engine.PerformanceOptions
 import io.enkidu.export.EnkiduReportWriters
 import picocli.CommandLine
 import java.nio.file.Files
@@ -77,6 +78,39 @@ class CompareCommand : Runnable {
     )
     var out: Path? = null
 
+    @CommandLine.Option(
+        names = ["--jar-scan-cache-dir"],
+        description = [
+            "Enable the jar scanning cache by providing a directory.",
+            "The cache is keyed by jar SHA-256 and stores jar entry scans (classes + META-INF/services).",
+        ],
+    )
+    var jarScanCacheDir: Path? = null
+
+    @CommandLine.Option(
+        names = ["--jar-scan-parallelism"],
+        defaultValue = "1",
+        description = ["Parallelism for runtime classpath jar scanning (>= 1)."],
+    )
+    var jarScanParallelism: Int = 1
+
+    @CommandLine.Option(
+        names = ["--target-scan-parallelism"],
+        defaultValue = "1",
+        description = ["Parallelism for scanning target classfiles (>= 1)."],
+    )
+    var targetScanParallelism: Int = 1
+
+    @CommandLine.Option(
+        names = ["--max-in-flight-target-classes"],
+        defaultValue = "0",
+        description = [
+            "Bound queued class scan work-items to limit memory.",
+            "0 means use 2×target-scan-parallelism.",
+        ],
+    )
+    var maxInFlightTargetClasses: Int = 0
+
     override fun run() {
         val targets = readManifestPaths(targetsManifest)
         val cpA = readManifestPaths(classpathA)
@@ -91,6 +125,13 @@ class CompareCommand : Runnable {
                     classpathB = cpB,
                     labelA = labelA,
                     labelB = labelB,
+                    performance =
+                        PerformanceOptions(
+                            jarScanCacheDir = jarScanCacheDir,
+                            jarScanParallelism = jarScanParallelism,
+                            targetScanParallelism = targetScanParallelism,
+                            maxInFlightTargetClasses = maxInFlightTargetClasses.takeIf { it > 0 },
+                        ),
                 ),
             )
 

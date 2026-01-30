@@ -34,27 +34,52 @@ import kotlin.io.path.isRegularFile
  * - targets are processed in the order they are provided
  */
 class TargetReferenceScanner(
-    private val classScanner: BytecodeReferenceScanner = BytecodeReferenceScanner(),
+    internal val bytecodeScanner: BytecodeReferenceScanner = BytecodeReferenceScanner(),
 ) {
     fun scanTargets(targets: List<Path>): List<BytecodeReference> {
         val out = mutableListOf<BytecodeReference>()
+        scanTargetsStreaming(targets) { out.add(it) }
+        return out
+    }
 
+    /**
+     * Stream references in deterministic order without accumulating the full list.
+     */
+    fun scanTargetsStreaming(
+        targets: List<Path>,
+        sink: (BytecodeReference) -> Unit,
+    ) {
+        forEachTargetClassBytes(targets) { bytes ->
+            bytecodeScanner.scanClassBytes(bytes).forEach(sink)
+        }
+    }
+
+    /**
+     * Stream target class bytes in deterministic order without keeping them all in memory.
+     *
+     * This is the low-level hook used by Milestone O bounded-parallel scan paths.
+     */
+    fun forEachTargetClassBytes(
+        targets: List<Path>,
+        sink: (ByteArray) -> Unit,
+    ) {
         for (raw in targets) {
             val t = raw.toAbsolutePath().normalize()
             require(Files.exists(t)) { "target does not exist: $t" }
             require(Files.isReadable(t)) { "target is not readable: $t" }
 
             when {
-                t.isDirectory() -> out.addAll(scanDirectory(t))
-                t.isRegularFile() && looksLikeJar(t) -> out.addAll(scanJar(t))
+                t.isDirectory() -> forEachDirectoryClassBytes(t, sink)
+                t.isRegularFile() && looksLikeJar(t) -> forEachJarClassBytes(t, sink)
                 else -> throw IllegalArgumentException("unsupported target: $t")
             }
         }
-
-        return out
     }
 
-    private fun scanDirectory(dir: Path): List<BytecodeReference> {
+    private fun forEachDirectoryClassBytes(
+        dir: Path,
+        sink: (ByteArray) -> Unit,
+    ) {
         val classFiles =
             Files.walk(dir).use { stream ->
                 stream
@@ -63,14 +88,15 @@ class TargetReferenceScanner(
                     .toList()
             }
 
-        val out = mutableListOf<BytecodeReference>()
         for (file in classFiles) {
-            out.addAll(classScanner.scanClassBytes(Files.readAllBytes(file)))
+            sink(Files.readAllBytes(file))
         }
-        return out
     }
 
-    private fun scanJar(jar: Path): List<BytecodeReference> {
+    private fun forEachJarClassBytes(
+        jar: Path,
+        sink: (ByteArray) -> Unit,
+    ) {
         ZipFile(jar.toFile()).use { zip ->
             val entries =
                 zip
@@ -78,13 +104,10 @@ class TargetReferenceScanner(
                     .toList()
                     .filter { !it.isDirectory && it.name.endsWith(".class") }
                     .sortedBy { it.name }
-
-            val out = mutableListOf<BytecodeReference>()
             for (e in entries) {
                 val bytes = zip.getInputStream(e).use { it.readBytes() }
-                out.addAll(classScanner.scanClassBytes(bytes))
+                sink(bytes)
             }
-            return out
         }
     }
 

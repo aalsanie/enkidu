@@ -28,15 +28,28 @@ import io.enkidu.artifacts.v1.Fingerprints
 import io.enkidu.artifacts.v1.LinkageFailure
 import io.enkidu.artifacts.v1.LinkageReport
 import io.enkidu.artifacts.v1.ReportSummary
+import io.enkidu.artifacts.v1.SymbolKind
 import io.enkidu.artifacts.v1.WinnerChange
+import io.enkidu.core.dup.DuplicateImpactAnalyzer
 import io.enkidu.core.model.ClasspathSnapshot
 import io.enkidu.core.model.JarIndex
+import io.enkidu.core.perf.FileJarScanCache
+import io.enkidu.core.perf.JarScanRepository
 import io.enkidu.core.resolve.AccessChecker
 import io.enkidu.core.resolve.JvmLinkageResolver
 import io.enkidu.core.resolve.ModuleIndex
 import io.enkidu.core.scan.BytecodeReference
 import io.enkidu.core.scan.TargetReferenceScanner
+import io.enkidu.core.spi.SpiValidator
 import java.nio.file.Path
+import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.ConcurrentSkipListSet
+import java.util.concurrent.ExecutorCompletionService
+import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
 
 /**
  * Headless, deterministic engine entrypoint.
@@ -53,30 +66,52 @@ class LinkageDoctorEngine(
         require(request.targets.isNotEmpty()) { "targets must not be empty." }
         require(request.runtimeClasspath.isNotEmpty()) { "runtimeClasspath must not be empty." }
 
+        val perf = request.performance
+        val jarScanParallelism = perf.jarScanParallelism ?: 1
+
         val snapshot = ClasspathSnapshot.fromPaths(request.runtimeClasspath)
         val moduleIndex = ModuleIndex.build(snapshot)
-        val references: List<BytecodeReference> = targetScanner.scanTargets(request.targets)
 
-        val referencedBinaryClasses: Set<String> =
-            references.map { it.symbol.owner.replace('/', '.') }.toSet()
+        val jarScanCache = perf.jarScanCacheDir?.let { FileJarScanCache(it) }
+        val jarScans = JarScanRepository(cache = jarScanCache)
+        val jarIndex =
+            JarIndex.build(
+                snapshot = snapshot,
+                jarScans = jarScans,
+                jarScanParallelism = jarScanParallelism,
+            )
 
-        val jarIndex = JarIndex.build(snapshot)
+        val referencedBinaryClasses = ConcurrentHashMap.newKeySet<String>()
+        val failures = ConcurrentLinkedQueue<LinkageFailure>()
+        val callersByCallee = ConcurrentHashMap<MethodId, ConcurrentSkipListSet<MethodId>>()
 
-        val callGraph = CallGraphIndex.fromReferences(references)
-        val failures =
+        val allFailures: List<LinkageFailure> =
             JvmLinkageResolver(snapshot).use { resolver ->
                 val accessChecker = AccessChecker(resolver = resolver, moduleIndex = moduleIndex)
                 val classifier = LinkageFailureClassifier(snapshot, accessChecker, jarIndex)
 
-                val linkageFailures = references.mapNotNull { classifier.classify(it, resolver, callGraph) }
-                val spiFailures =
-                    io.enkidu.core.spi
-                        .SpiValidator(snapshot)
-                        .validate(resolver)
-                val duplicateFailures =
-                    io.enkidu.core.dup
-                        .DuplicateImpactAnalyzer(jarIndex)
-                        .analyze(referencedBinaryClasses)
+                scanTargetsBoundedParallel(
+                    targets = request.targets,
+                    perf = perf,
+                    classifier = classifier,
+                    resolver = resolver,
+                    referencedBinaryClasses = referencedBinaryClasses,
+                    callersByCallee = callersByCallee,
+                    failures = failures,
+                )
+
+                val callGraph =
+                    CallGraphIndex.fromCallersByCallee(
+                        callersByCallee.mapValues { (_, v) -> v.toSet() },
+                    )
+
+                val linkageFailures =
+                    failures
+                        .toList()
+                        .map { enrichOneHopCallers(it, callGraph) }
+
+                val spiFailures = SpiValidator(snapshot, jarScans).validate(resolver)
+                val duplicateFailures = DuplicateImpactAnalyzer(jarIndex).analyze(referencedBinaryClasses)
 
                 (linkageFailures + spiFailures + duplicateFailures).sortedWith(LinkageFailure.CANONICAL_ORDER)
             }
@@ -91,7 +126,7 @@ class LinkageDoctorEngine(
                         report = null,
                     ),
                 summary = ReportSummary(failureCount = 0, failureCountByType = emptyMap()),
-                failures = failures,
+                failures = allFailures,
             )
 
         return report.canonical()
@@ -107,14 +142,13 @@ class LinkageDoctorEngine(
         require(request.classpathA.isNotEmpty()) { "classpathA must not be empty." }
         require(request.classpathB.isNotEmpty()) { "classpathB must not be empty." }
 
-        val references = targetScanner.scanTargets(request.targets)
-
         val reportA =
             run(
                 LinkageDoctorRequest(
                     tool = request.tool,
                     targets = request.targets,
                     runtimeClasspath = request.classpathA,
+                    performance = request.performance,
                 ),
             )
 
@@ -124,6 +158,7 @@ class LinkageDoctorEngine(
                     tool = request.tool,
                     targets = request.targets,
                     runtimeClasspath = request.classpathB,
+                    performance = request.performance,
                 ),
             )
 
@@ -142,7 +177,13 @@ class LinkageDoctorEngine(
                 .mapNotNull { keyA[it] }
                 .sortedWith(LinkageFailure.CANONICAL_ORDER)
 
-        val winnerChanges = computeWinnerChanges(references, request.classpathA, request.classpathB)
+        val winnerChanges =
+            computeWinnerChangesStreaming(
+                targets = request.targets,
+                classpathA = request.classpathA,
+                classpathB = request.classpathB,
+                perf = request.performance,
+            )
 
         val summary =
             CompareSummary(
@@ -185,6 +226,89 @@ class LinkageDoctorEngine(
         return compare.canonical()
     }
 
+    private fun scanTargetsBoundedParallel(
+        targets: List<Path>,
+        perf: PerformanceOptions,
+        classifier: LinkageFailureClassifier,
+        resolver: JvmLinkageResolver,
+        referencedBinaryClasses: MutableSet<String>,
+        callersByCallee: ConcurrentHashMap<MethodId, ConcurrentSkipListSet<MethodId>>,
+        failures: ConcurrentLinkedQueue<LinkageFailure>,
+    ) {
+        val parallelism = perf.targetScanParallelism ?: 1
+        require(parallelism >= 1) { "targetScanParallelism must be >= 1" }
+
+        fun consumeReference(ref: BytecodeReference) {
+            // Track binary class owners (used later for duplicate impact analysis).
+            val ownerBinary = ref.symbol.owner.replace('/', '.')
+            if (ownerBinary.isNotBlank()) referencedBinaryClasses.add(ownerBinary)
+
+            // Call graph edge (callee -> callers)
+            if (ref.symbol.kind == SymbolKind.METHOD && CallGraphIndex.isInvokeOpcode(ref.opcode)) {
+                val caller = MethodId(ref.site.callerClass, ref.site.callerMethod, ref.site.callerDescriptor)
+                val callee = CallGraphIndex.toMethodId(ref.symbol)
+                callersByCallee.computeIfAbsent(callee) { ConcurrentSkipListSet() }.add(caller)
+            }
+
+            val failure = classifier.classify(ref, resolver, callGraph = null)
+            if (failure != null) failures.add(failure)
+        }
+
+        if (parallelism == 1) {
+            targetScanner.scanTargetsStreaming(targets) { consumeReference(it) }
+            return
+        }
+
+        val maxInFlight =
+            when {
+                (perf.maxInFlightTargetClasses ?: 0) > 0 -> perf.maxInFlightTargetClasses!!
+                else -> parallelism * 2
+            }
+
+        val exec = Executors.newFixedThreadPool(parallelism)
+        val completion = ExecutorCompletionService<Unit>(exec)
+        val permits = Semaphore(maxInFlight)
+        var submitted = 0
+
+        try {
+            // Stream class bytes (bounded), submit scan+classify tasks.
+            targetScanner.forEachTargetClassBytes(targets) { bytes ->
+                permits.acquire()
+                completion.submit(
+                    Callable<Unit> {
+                        try {
+                            val refs = targetScanner.bytecodeScanner.scanClassBytes(bytes)
+                            for (r in refs) consumeReference(r)
+                        } finally {
+                            permits.release()
+                        }
+                        Unit
+                    },
+                )
+                submitted++
+            }
+
+            repeat(submitted) {
+                completion.take().get()
+            }
+        } finally {
+            exec.shutdown()
+            exec.awaitTermination(2, TimeUnit.MINUTES)
+        }
+    }
+
+    private fun enrichOneHopCallers(
+        f: LinkageFailure,
+        callGraph: CallGraphIndex,
+    ): LinkageFailure {
+        if (f.message.contains("One-hop callers:")) return f
+        val site = f.referenceSite
+        val method = MethodId(site.callerClass, site.callerMethod, site.callerDescriptor)
+        val oneHop = callGraph.callersOf(method).take(3)
+        if (oneHop.isEmpty()) return f
+        return f.copy(message = f.message + " | One-hop callers: " + oneHop.joinToString(", ") { it.toString() })
+    }
+
     private fun fingerprintOfPaths(paths: List<Path>): Fingerprint {
         val normalized = normalizeForFingerprint(paths).joinToString(separator = "\n")
         return Fingerprint(
@@ -211,7 +335,6 @@ class LinkageDoctorEngine(
         val name = sym?.name.orEmpty()
         val desc = sym?.descriptor.orEmpty()
 
-        // A stable identity that survives evidence/fix-plan differences.
         return buildString {
             append(f.type.name)
             append('|')
@@ -235,35 +358,39 @@ class LinkageDoctorEngine(
         }
     }
 
-    private fun computeWinnerChanges(
-        references: List<BytecodeReference>,
+    private fun computeWinnerChangesStreaming(
+        targets: List<Path>,
         classpathA: List<Path>,
         classpathB: List<Path>,
+        perf: PerformanceOptions,
     ): List<WinnerChange> {
-        val jarA = JarIndex.build(ClasspathSnapshot.fromPaths(classpathA))
-        val jarB = JarIndex.build(ClasspathSnapshot.fromPaths(classpathB))
+        val snapshotA = ClasspathSnapshot.fromPaths(classpathA)
+        val snapshotB = ClasspathSnapshot.fromPaths(classpathB)
 
-        val interestingBinaryClasses: Set<String> =
-            references
-                .asSequence()
-                .flatMap { seqOf(it.site.callerClass, it.symbol.owner) }
-                .map { it.replace('/', '.') }
-                .filter { it.isNotBlank() }
-                .toSet()
+        val jarScanParallelism = perf.jarScanParallelism ?: 1
+        val jarScanCache = perf.jarScanCacheDir?.let { FileJarScanCache(it) }
+        val jarScans = JarScanRepository(cache = jarScanCache)
+
+        val jarA = JarIndex.build(snapshotA, jarScans, jarScanParallelism)
+        val jarB = JarIndex.build(snapshotB, jarScans, jarScanParallelism)
+
+        val interesting = ConcurrentHashMap.newKeySet<String>()
+
+        // Stream references (no in-memory list) to compute which classes are worth checking.
+        targetScanner.scanTargetsStreaming(targets) { ref ->
+            interesting.add(ref.site.callerClass.replace('/', '.'))
+            interesting.add(ref.symbol.owner.replace('/', '.'))
+        }
 
         val changes = mutableListOf<WinnerChange>()
-        for (cls in interestingBinaryClasses.sorted()) {
+        for (cls in interesting.asSequence().filter { it.isNotBlank() }.sorted()) {
             val winA = jarA.winnerOf(cls)?.entryPath?.toString()
             val winB = jarB.winnerOf(cls)?.entryPath?.toString()
             if (winA != null && winB != null && winA != winB) {
                 changes += WinnerChange(className = cls, winnerA = winA, winnerB = winB)
             }
         }
-        return changes
-    }
 
-    private fun <T> seqOf(
-        a: T,
-        b: T,
-    ): Sequence<T> = sequenceOf(a, b)
+        return changes.sortedBy { it.className }
+    }
 }

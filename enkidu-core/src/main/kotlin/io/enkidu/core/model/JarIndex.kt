@@ -18,12 +18,13 @@
  */
 package io.enkidu.core.model
 
-import java.io.BufferedInputStream
-import java.io.IOException
+import io.enkidu.core.perf.JarScanRepository
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Collections
-import java.util.zip.ZipInputStream
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorCompletionService
+import java.util.concurrent.Executors
 import kotlin.io.path.isRegularFile
 
 /**
@@ -75,17 +76,66 @@ class JarIndex private constructor(
     )
 
     companion object {
-        fun build(snapshot: ClasspathSnapshot): JarIndex {
+        fun build(snapshot: ClasspathSnapshot): JarIndex =
+            build(snapshot = snapshot, jarScans = JarScanRepository(cache = null), jarScanParallelism = 1)
+
+        fun build(
+            snapshot: ClasspathSnapshot,
+            jarScans: JarScanRepository,
+            jarScanParallelism: Int,
+        ): JarIndex {
+            require(jarScanParallelism >= 1) { "jarScanParallelism must be >= 1" }
+
             val map = mutableMapOf<String, MutableList<ClassLocation>>()
 
-            snapshot.entries.forEachIndexed { idx, entry ->
-                when (entry) {
-                    is ClasspathEntry.Directory -> indexDirectory(entry.path, idx, map)
-                    is ClasspathEntry.Jar -> indexJar(entry.path, idx, map)
+            // Pre-scan jar entries into per-index slots (optionally in parallel).
+            // IMPORTANT: we DO NOT add jar classes to the index here.
+            // Adding must happen strictly in snapshot.entries order to preserve winner selection.
+            val jarResults: Array<List<String>?> = arrayOfNulls(snapshot.entries.size)
+
+            val jars =
+                snapshot.entries.mapIndexedNotNull { idx, entry ->
+                    (entry as? ClasspathEntry.Jar)?.let { idx to it.path }
+                }
+
+            if (jars.isNotEmpty()) {
+                if (jarScanParallelism == 1) {
+                    for ((idx, jar) in jars) {
+                        jarResults[idx] = scanJarClasses(jarScans, jar)
+                    }
+                } else {
+                    val executor = Executors.newFixedThreadPool(jarScanParallelism)
+                    try {
+                        val completion = ExecutorCompletionService<Pair<Int, List<String>>>(executor)
+                        for ((idx, jar) in jars) {
+                            completion.submit(
+                                Callable<Pair<Int, List<String>>> { idx to scanJarClasses(jarScans, jar) },
+                            )
+                        }
+
+                        repeat(jars.size) {
+                            val (idx, classes) = completion.take().get()
+                            jarResults[idx] = classes
+                        }
+                    } finally {
+                        executor.shutdown()
+                    }
                 }
             }
 
-            // Freeze to immutable with stable ordering of location lists (classpath order already).
+            // Commit both directory and jar classes STRICTLY in classpath order.
+            snapshot.entries.forEachIndexed { idx, entry ->
+                when (entry) {
+                    is ClasspathEntry.Directory -> indexDirectory(entry.path, idx, map)
+                    is ClasspathEntry.Jar -> {
+                        val classes = jarResults[idx].orEmpty()
+                        for (clazz in classes) {
+                            addLocation(map, clazz, idx, entry.path)
+                        }
+                    }
+                }
+            }
+
             val frozen =
                 map
                     .mapValues { (_, v) -> Collections.unmodifiableList(v.toList()) }
@@ -120,33 +170,12 @@ class JarIndex private constructor(
             }
         }
 
-        private fun indexJar(
+        private fun scanJarClasses(
+            jarScans: JarScanRepository,
             jar: Path,
-            entryIndex: Int,
-            into: MutableMap<String, MutableList<ClassLocation>>,
-        ) {
-            if (!jar.isRegularFile()) return
-
-            try {
-                BufferedInputStream(Files.newInputStream(jar)).use { input ->
-                    ZipInputStream(input).use { zis ->
-                        while (true) {
-                            val e = zis.nextEntry ?: break
-                            if (!e.isDirectory && e.name.endsWith(".class")) {
-                                val className =
-                                    e.name
-                                        .removeSuffix(".class")
-                                        .replace('/', '.')
-                                addLocation(into, className, entryIndex, jar)
-                            }
-                            zis.closeEntry()
-                        }
-                    }
-                }
-            } catch (_: IOException) {
-                // Treat unreadable/non-zip jars as empty; higher layers may choose to fail hard later.
-                return
-            }
+        ): List<String> {
+            if (!jar.isRegularFile()) return emptyList()
+            return jarScans.scanJar(jar).classes
         }
 
         private fun addLocation(

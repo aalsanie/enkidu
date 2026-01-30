@@ -16,17 +16,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.enkidu.core.engine
+package io.enkidu.core.perf
 
-import io.enkidu.artifacts.v1.ToolMetadata
-import java.nio.file.Path
-
-data class LinkageDoctorCompareRequest(
-    val tool: ToolMetadata,
-    val targets: List<Path>,
-    val classpathA: List<Path>,
-    val classpathB: List<Path>,
-    val labelA: String = "A",
-    val labelB: String = "B",
-    val performance: PerformanceOptions = PerformanceOptions(),
+/**
+ * Cached scan product for a single jar, keyed by [sha256Hex].
+ *
+ * This is intentionally minimal: enough to avoid re-opening and re-walking jar central directories
+ * for JarIndex + SPI validation.
+ */
+data class JarScanData(
+    /** SHA-256 of the *jar file bytes* (not of decompressed entries). */
+    val sha256Hex: String,
+    /** Binary class names (java.lang.String) contained in this jar. */
+    val classes: List<String>,
+    /** Map: service binary name -> providers list (already normalized/deduped/sorted). */
+    val services: Map<String, List<String>>,
 )
