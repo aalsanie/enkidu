@@ -16,17 +16,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.enkidu.core.engine
+package io.enkidu.core.perf
 
-import io.enkidu.artifacts.v1.ToolMetadata
-import java.nio.file.Path
+/**
+ * Persistent cache for jar scan products.
+ *
+ * Keyed strictly by jar SHA-256. If two different paths have identical bytes, they share cache.
+ */
+interface JarScanCache {
+    fun get(sha256Hex: String): JarScanData?
 
-data class LinkageDoctorCompareRequest(
-    val tool: ToolMetadata,
-    val targets: List<Path>,
-    val classpathA: List<Path>,
-    val classpathB: List<Path>,
-    val labelA: String = "A",
-    val labelB: String = "B",
-    val performance: PerformanceOptions = PerformanceOptions(),
-)
+    fun put(data: JarScanData)
+}

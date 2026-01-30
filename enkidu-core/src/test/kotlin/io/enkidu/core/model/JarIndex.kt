@@ -22,7 +22,6 @@ import io.enkidu.core.perf.JarScanRepository
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Collections
-import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import kotlin.io.path.isRegularFile
@@ -88,14 +87,17 @@ class JarIndex private constructor(
 
             val map = mutableMapOf<String, MutableList<ClassLocation>>()
 
-            // Pre-scan jar entries into per-index slots (optionally in parallel).
-            // IMPORTANT: we DO NOT add jar classes to the index here.
-            // Adding must happen strictly in snapshot.entries order to preserve winner selection.
-            val jarResults: Array<List<String>?> = arrayOfNulls(snapshot.entries.size)
+            // Directory entries are already cheap; scan them on the calling thread.
+            snapshot.entries.forEachIndexed { idx, entry ->
+                if (entry is ClasspathEntry.Directory) {
+                    indexDirectory(entry.path, idx, map)
+                }
+            }
 
+            val jarResults: Array<List<String>?> = arrayOfNulls(snapshot.entries.size)
             val jars =
                 snapshot.entries.mapIndexedNotNull { idx, entry ->
-                    (entry as? ClasspathEntry.Jar)?.let { idx to it.path }
+                    (entry as? ClasspathEntry.Jar)?.let { Pair(idx, it.path) }
                 }
 
             if (jars.isNotEmpty()) {
@@ -109,7 +111,9 @@ class JarIndex private constructor(
                         val completion = ExecutorCompletionService<Pair<Int, List<String>>>(executor)
                         for ((idx, jar) in jars) {
                             completion.submit(
-                                Callable<Pair<Int, List<String>>> { idx to scanJarClasses(jarScans, jar) },
+                                java.util.concurrent.Callable {
+                                    idx to scanJarClasses(jarScans, jar)
+                                },
                             )
                         }
 
@@ -121,13 +125,10 @@ class JarIndex private constructor(
                         executor.shutdown()
                     }
                 }
-            }
 
-            // Commit both directory and jar classes STRICTLY in classpath order.
-            snapshot.entries.forEachIndexed { idx, entry ->
-                when (entry) {
-                    is ClasspathEntry.Directory -> indexDirectory(entry.path, idx, map)
-                    is ClasspathEntry.Jar -> {
+                // Deterministic: add jar classes in classpath order.
+                snapshot.entries.forEachIndexed { idx, entry ->
+                    if (entry is ClasspathEntry.Jar) {
                         val classes = jarResults[idx].orEmpty()
                         for (clazz in classes) {
                             addLocation(map, clazz, idx, entry.path)

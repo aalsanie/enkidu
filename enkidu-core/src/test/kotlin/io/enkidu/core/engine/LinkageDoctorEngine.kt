@@ -42,7 +42,6 @@ import io.enkidu.core.scan.BytecodeReference
 import io.enkidu.core.scan.TargetReferenceScanner
 import io.enkidu.core.spi.SpiValidator
 import java.nio.file.Path
-import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ConcurrentSkipListSet
@@ -67,19 +66,13 @@ class LinkageDoctorEngine(
         require(request.runtimeClasspath.isNotEmpty()) { "runtimeClasspath must not be empty." }
 
         val perf = request.performance
-        val jarScanParallelism = perf.jarScanParallelism ?: 1
 
         val snapshot = ClasspathSnapshot.fromPaths(request.runtimeClasspath)
         val moduleIndex = ModuleIndex.build(snapshot)
 
         val jarScanCache = perf.jarScanCacheDir?.let { FileJarScanCache(it) }
         val jarScans = JarScanRepository(cache = jarScanCache)
-        val jarIndex =
-            JarIndex.build(
-                snapshot = snapshot,
-                jarScans = jarScans,
-                jarScanParallelism = jarScanParallelism,
-            )
+        val jarIndex = JarIndex.build(snapshot = snapshot, jarScans = jarScans, jarScanParallelism = perf.jarScanParallelism)
 
         val referencedBinaryClasses = ConcurrentHashMap.newKeySet<String>()
         val failures = ConcurrentLinkedQueue<LinkageFailure>()
@@ -177,13 +170,7 @@ class LinkageDoctorEngine(
                 .mapNotNull { keyA[it] }
                 .sortedWith(LinkageFailure.CANONICAL_ORDER)
 
-        val winnerChanges =
-            computeWinnerChangesStreaming(
-                targets = request.targets,
-                classpathA = request.classpathA,
-                classpathB = request.classpathB,
-                perf = request.performance,
-            )
+        val winnerChanges = computeWinnerChangesStreaming(request.targets, request.classpathA, request.classpathB, request.performance)
 
         val summary =
             CompareSummary(
@@ -235,7 +222,7 @@ class LinkageDoctorEngine(
         callersByCallee: ConcurrentHashMap<MethodId, ConcurrentSkipListSet<MethodId>>,
         failures: ConcurrentLinkedQueue<LinkageFailure>,
     ) {
-        val parallelism = perf.targetScanParallelism ?: 1
+        val parallelism = perf.targetScanParallelism
         require(parallelism >= 1) { "targetScanParallelism must be >= 1" }
 
         fun consumeReference(ref: BytecodeReference) {
@@ -275,7 +262,7 @@ class LinkageDoctorEngine(
             targetScanner.forEachTargetClassBytes(targets) { bytes ->
                 permits.acquire()
                 completion.submit(
-                    Callable<Unit> {
+                    java.util.concurrent.Callable {
                         try {
                             val refs = targetScanner.bytecodeScanner.scanClassBytes(bytes)
                             for (r in refs) consumeReference(r)
@@ -367,12 +354,11 @@ class LinkageDoctorEngine(
         val snapshotA = ClasspathSnapshot.fromPaths(classpathA)
         val snapshotB = ClasspathSnapshot.fromPaths(classpathB)
 
-        val jarScanParallelism = perf.jarScanParallelism ?: 1
         val jarScanCache = perf.jarScanCacheDir?.let { FileJarScanCache(it) }
         val jarScans = JarScanRepository(cache = jarScanCache)
 
-        val jarA = JarIndex.build(snapshotA, jarScans, jarScanParallelism)
-        val jarB = JarIndex.build(snapshotB, jarScans, jarScanParallelism)
+        val jarA = JarIndex.build(snapshotA, jarScans, perf.jarScanParallelism)
+        val jarB = JarIndex.build(snapshotB, jarScans, perf.jarScanParallelism)
 
         val interesting = ConcurrentHashMap.newKeySet<String>()
 

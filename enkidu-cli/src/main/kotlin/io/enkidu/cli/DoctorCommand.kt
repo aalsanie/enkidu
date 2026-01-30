@@ -23,6 +23,7 @@ import io.enkidu.artifacts.v1.Severity
 import io.enkidu.artifacts.v1.ToolMetadata
 import io.enkidu.core.engine.LinkageDoctorEngine
 import io.enkidu.core.engine.LinkageDoctorRequest
+import io.enkidu.core.engine.PerformanceOptions
 import io.enkidu.export.EnkiduReportWriters
 import picocli.CommandLine
 import java.nio.charset.StandardCharsets
@@ -84,6 +85,39 @@ internal class DoctorCommand : Callable<Int> {
     )
     private var failOn: FailOnPolicy = FailOnPolicy.ANY
 
+    @CommandLine.Option(
+        names = ["--jar-scan-cache-dir"],
+        description = [
+            "Enable the jar scanning cache by providing a directory.",
+            "The cache is keyed by jar SHA-256 and stores jar entry scans (classes + META-INF/services).",
+        ],
+    )
+    private var jarScanCacheDir: Path? = null
+
+    @CommandLine.Option(
+        names = ["--jar-scan-parallelism"],
+        defaultValue = "1",
+        description = ["Parallelism for runtime classpath jar scanning (>= 1)."],
+    )
+    private var jarScanParallelism: Int = 1
+
+    @CommandLine.Option(
+        names = ["--target-scan-parallelism"],
+        defaultValue = "1",
+        description = ["Parallelism for scanning target classfiles (>= 1)."],
+    )
+    private var targetScanParallelism: Int = 1
+
+    @CommandLine.Option(
+        names = ["--max-in-flight-target-classes"],
+        defaultValue = "0",
+        description = [
+            "Bound queued class scan work-items to limit memory.",
+            "0 means use 2×target-scan-parallelism.",
+        ],
+    )
+    private var maxInFlightTargetClasses: Int = 0
+
     @CommandLine.Spec
     private lateinit var spec: CommandLine.Model.CommandSpec
 
@@ -103,6 +137,13 @@ internal class DoctorCommand : Callable<Int> {
                             ),
                         targets = targets.toList(),
                         runtimeClasspath = resolvedClasspath,
+                        performance =
+                            PerformanceOptions(
+                                jarScanCacheDir = jarScanCacheDir,
+                                jarScanParallelism = jarScanParallelism,
+                                targetScanParallelism = targetScanParallelism,
+                                maxInFlightTargetClasses = maxInFlightTargetClasses.takeIf { it > 0 },
+                            ),
                     ),
                 )
 

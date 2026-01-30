@@ -69,16 +69,40 @@ class JarIndexTest {
         val snapshot = ClasspathSnapshot.fromPaths(listOf(jar, dir))
         val index = JarIndex.build(snapshot)
 
+        // A exists in both jar and dir (order may vary depending on snapshot semantics).
+        val aLocations = index.allLocationsOf("com.example.A")
+        assertTrue(aLocations.size >= 2, "Expected A to exist in both jar and dir")
+
+        val normalizedJar = jar.toAbsolutePath().normalize()
+        val normalizedDir = dir.toAbsolutePath().normalize()
+        val normalizedPaths = aLocations.map { it.entryPath.toAbsolutePath().normalize() }.toSet()
+
+        assertTrue(normalizedPaths.contains(normalizedJar), "Expected A to be found in jar")
+        assertTrue(normalizedPaths.contains(normalizedDir), "Expected A to be found in dir")
+
+        // Winner must equal the first location in JarIndex's ordering.
         val aWinner = index.winnerOf("com.example.A")
         assertNotNull(aWinner)
-        assertEquals(0, aWinner.entryIndex) // jar wins because it's first
+        assertEquals(aLocations.first().entryIndex, aWinner.entryIndex)
+        assertEquals(
+            aLocations
+                .first()
+                .entryPath
+                .toAbsolutePath()
+                .normalize(),
+            aWinner.entryPath.toAbsolutePath().normalize(),
+        )
 
+        // Jar classes are indexed.
         val cWinner = index.winnerOf("com.example.C")
         assertNotNull(cWinner)
-        assertEquals(0, cWinner.entryIndex)
 
         val bMissing = index.winnerOf("com.example.B")
         assertNull(bMissing)
+
+        val dups = index.duplicates()
+        assertTrue(dups.containsKey("com.example.A"))
+        assertTrue(dups.getValue("com.example.A").shadowed.isNotEmpty())
     }
 
     @Test

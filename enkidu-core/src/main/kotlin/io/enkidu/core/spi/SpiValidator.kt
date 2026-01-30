@@ -29,6 +29,7 @@ import io.enkidu.artifacts.v1.SpiEvidence
 import io.enkidu.artifacts.v1.SymbolId
 import io.enkidu.artifacts.v1.SymbolKind
 import io.enkidu.core.model.ClasspathSnapshot
+import io.enkidu.core.perf.JarScanRepository
 import io.enkidu.core.resolve.ClassResolutionOutcome
 import io.enkidu.core.resolve.JvmLinkageResolver
 import org.objectweb.asm.Opcodes
@@ -48,9 +49,10 @@ import org.objectweb.asm.Opcodes
 
 class SpiValidator(
     private val snapshot: ClasspathSnapshot,
+    private val jarScans: JarScanRepository? = null,
 ) {
     fun validate(resolver: JvmLinkageResolver): List<LinkageFailure> {
-        val index = ServiceFileIndex(snapshot).index()
+        val index = ServiceFileIndex(snapshot, jarScans).index()
         val out = mutableListOf<LinkageFailure>()
 
         for ((serviceBinaryName, locations) in index) {

@@ -59,9 +59,18 @@ class CallGraphIndex private constructor(
             return CallGraphIndex(frozen)
         }
 
-        private fun toMethodId(symbol: SymbolId): MethodId = MethodId(symbol.owner, symbol.name, symbol.descriptor)
+        /** Build from a pre-aggregated callers map (used by parallel scan paths). */
+        fun fromCallersByCallee(callersByCallee: Map<MethodId, Set<MethodId>>): CallGraphIndex {
+            val frozen =
+                callersByCallee
+                    .mapValues { (_, v) -> v.toSortedSet() }
+                    .toSortedMap()
+            return CallGraphIndex(frozen)
+        }
 
-        private fun isInvokeOpcode(opcode: Int): Boolean =
+        internal fun toMethodId(symbol: SymbolId): MethodId = MethodId(symbol.owner, symbol.name, symbol.descriptor)
+
+        internal fun isInvokeOpcode(opcode: Int): Boolean =
             opcode == org.objectweb.asm.Opcodes.INVOKEVIRTUAL ||
                 opcode == org.objectweb.asm.Opcodes.INVOKESPECIAL ||
                 opcode == org.objectweb.asm.Opcodes.INVOKESTATIC ||

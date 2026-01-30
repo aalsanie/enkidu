@@ -16,25 +16,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.enkidu.core.engine
+package io.enkidu.core.perf
 
-import io.enkidu.artifacts.v1.ToolMetadata
+import java.io.InputStream
+import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
 
-/**
- * Explicit input for a single Linkage Doctor run.
- *
- * Enkidu makes no build-tool assumptions. Callers must provide:
- * - the compiled targets to scan (classes directory and/or jar)
- * - the exact runtime classpath in resolution order
- * - tool metadata to embed in the resulting report
- */
-data class LinkageDoctorRequest(
-    val tool: ToolMetadata,
-    /** One or more targets to scan: classes directory or jar. */
-    val targets: List<Path>,
-    /** Runtime classpath entries (directories or jars) in JVM resolution order. */
-    val runtimeClasspath: List<Path>,
-    /** Performance and caching options (explicit, opt-in). */
-    val performance: PerformanceOptions = PerformanceOptions(),
-)
+internal object Sha256 {
+    fun ofFileHex(path: Path): String {
+        Files.newInputStream(path).use { input ->
+            return ofStreamHex(input)
+        }
+    }
+
+    fun ofStreamHex(input: InputStream): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        val buf = ByteArray(64 * 1024)
+        while (true) {
+            val r = input.read(buf)
+            if (r < 0) break
+            if (r > 0) md.update(buf, 0, r)
+        }
+        return md.digest().joinToString(separator = "") { "%02x".format(it) }
+    }
+}

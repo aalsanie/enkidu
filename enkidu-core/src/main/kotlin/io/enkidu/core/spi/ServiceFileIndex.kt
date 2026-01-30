@@ -20,6 +20,7 @@ package io.enkidu.core.spi
 
 import io.enkidu.core.model.ClasspathEntry
 import io.enkidu.core.model.ClasspathSnapshot
+import io.enkidu.core.perf.JarScanRepository
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
@@ -36,6 +37,7 @@ import kotlin.io.path.isDirectory
 
 class ServiceFileIndex(
     private val snapshot: ClasspathSnapshot,
+    private val jarScans: JarScanRepository? = null,
 ) {
     data class ServiceFileLocation(
         val entryIndex: Int,
@@ -85,6 +87,16 @@ class ServiceFileIndex(
         out: MutableMap<String, MutableList<ServiceFileLocation>>,
     ) {
         if (!Files.isRegularFile(jarPath)) return
+
+        val scans = jarScans
+        if (scans != null) {
+            val data = scans.scanJar(jarPath)
+            for ((service, providers) in data.services.toSortedMap()) {
+                out.getOrPut(service) { mutableListOf() }.add(ServiceFileLocation(entryIndex, jarPath, providers))
+            }
+            return
+        }
+
         JarFile(jarPath.toFile()).use { jar ->
             val entries =
                 jar

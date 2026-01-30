@@ -8,6 +8,13 @@
 - Duplicate-class impact analysis: compares winner vs shadowed copies via bytecode hash + public ABI shape, scores shadowing risk, and highlights dangerous duplicates vs benign identical copies.
 - Report evidence extended to include SPI and duplicate-risk details across JSON, SARIF, HTML, and IntelliJ UI.
 - New fixtures and tests reproducing common SPI failures and duplicate-risk cases.
+- jar-scan cache keyed by jar SHA-256 for fast repeat scans on large classpaths
+- Parallel classpath jar indexing with bounded concurrency
+- Streaming target analysis with bounded in-flight work to avoid holding large byte arrays/lists in memory
+- CLI knobs for performance tuning: jar scan parallelism, target scan parallelism, in-flight limits, and optional cache directory
+
+### Fixed
+- JarIndex winner selection now strictly follows classpath order across directories and jars
 
 ## [0.2.0]
 ### Added
