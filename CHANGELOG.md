@@ -12,6 +12,7 @@
 - Parallel classpath jar indexing with bounded concurrency
 - Streaming target analysis with bounded in-flight work to avoid holding large byte arrays/lists in memory
 - CLI knobs for performance tuning: jar scan parallelism, target scan parallelism, in-flight limits, and optional cache directory
+- Repro bundle output for `enkidu doctor` via `--bundle` (zip or directory). The bundle contains ordered `classpath.txt`, `targets.txt`, `bundle.json`.
 
 ### Fixed
 - JarIndex winner selection now strictly follows classpath order across directories and jars

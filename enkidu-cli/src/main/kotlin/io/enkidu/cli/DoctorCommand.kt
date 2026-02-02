@@ -25,6 +25,7 @@ import io.enkidu.core.engine.LinkageDoctorEngine
 import io.enkidu.core.engine.LinkageDoctorRequest
 import io.enkidu.core.engine.PerformanceOptions
 import io.enkidu.export.EnkiduReportWriters
+import io.enkidu.export.ReproBundleWriter
 import picocli.CommandLine
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -44,13 +45,24 @@ import java.util.concurrent.Callable
     ],
 )
 internal class DoctorCommand : Callable<Int> {
-    @CommandLine.Option(
-        names = ["--targets"],
-        required = true,
-        arity = "1..*",
-        description = ["One or more targets to scan: classes directory or jar."],
-    )
-    private lateinit var targets: Array<Path>
+    // Allow providing targets directly, via file, or both (merged in that order).
+    @CommandLine.ArgGroup(exclusive = false, multiplicity = "1")
+    private lateinit var targetsArg: TargetsArg
+
+    internal class TargetsArg {
+        @CommandLine.Option(
+            names = ["--targets"],
+            arity = "1..*",
+            description = ["One or more targets to scan: classes directory or jar."],
+        )
+        var targets: Array<Path>? = null
+
+        @CommandLine.Option(
+            names = ["--targets-file"],
+            description = ["Path to a file containing targets (one entry per line)."],
+        )
+        var targetsFile: Path? = null
+    }
 
     @CommandLine.Option(
         names = ["--classpath"],
@@ -77,6 +89,15 @@ internal class DoctorCommand : Callable<Int> {
         description = ["Write output to a file instead of stdout."],
     )
     private var output: Path? = null
+
+    @CommandLine.Option(
+        names = ["--bundle"],
+        description = [
+            "Optional repro bundle output (local only).",
+            "If the path ends with .zip, a zip bundle is written; otherwise a directory bundle is written.",
+        ],
+    )
+    private var bundle: Path? = null
 
     @CommandLine.Option(
         names = ["--fail-on"],
@@ -123,6 +144,7 @@ internal class DoctorCommand : Callable<Int> {
 
     override fun call(): Int =
         try {
+            val resolvedTargets = resolveTargets(targetsArg.targets, targetsArg.targetsFile)
             val resolvedClasspath = resolveClasspathEntries(classpathEntries.toList(), classpathFile)
             val engine = LinkageDoctorEngine()
 
@@ -135,7 +157,7 @@ internal class DoctorCommand : Callable<Int> {
                                 version = BuildInfo.version,
                                 resolverMode = RESOLVER_MODE,
                             ),
-                        targets = targets.toList(),
+                        targets = resolvedTargets,
                         runtimeClasspath = resolvedClasspath,
                         performance =
                             PerformanceOptions(
@@ -146,6 +168,15 @@ internal class DoctorCommand : Callable<Int> {
                             ),
                     ),
                 )
+
+            bundle?.let { bundleOut ->
+                ReproBundleWriter.writeDoctorBundle(
+                    report = report,
+                    targets = resolvedTargets,
+                    runtimeClasspath = resolvedClasspath,
+                    bundleOutput = bundleOut,
+                )
+            }
 
             val bytes =
                 when (format) {
@@ -220,6 +251,30 @@ internal class DoctorCommand : Callable<Int> {
             "runtime classpath must be provided via --classpath and or --classpath-file"
         }
 
+        return combined
+    }
+
+    private fun resolveTargets(
+        directTargets: Array<Path>?,
+        targetsFile: Path?,
+    ): List<Path> {
+        val fileTargets =
+            if (targetsFile == null) {
+                emptyList()
+            } else {
+                require(Files.isRegularFile(targetsFile)) { "targets file does not exist: $targetsFile" }
+                Files
+                    .readAllLines(targetsFile, StandardCharsets.UTF_8)
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && !it.startsWith("#") }
+                    .map { Path.of(it) }
+            }
+
+        val combined = mutableListOf<Path>()
+        combined.addAll(fileTargets)
+        directTargets?.let { combined.addAll(it) }
+
+        require(combined.isNotEmpty()) { "targets must be provided via --targets or --targets-file" }
         return combined
     }
 

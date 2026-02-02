@@ -22,6 +22,7 @@ import io.enkidu.artifacts.v1.DuplicateRiskLevel
 import io.enkidu.artifacts.v1.FailureType
 import io.enkidu.core.model.ClasspathSnapshot
 import io.enkidu.core.model.JarIndex
+import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -31,6 +32,7 @@ import javax.tools.StandardJavaFileManager
 import javax.tools.ToolProvider
 import kotlin.io.path.createDirectories
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -118,9 +120,9 @@ class DuplicateImpactAnalyzerTest {
         val dupFailure = failures.firstOrNull { it.type == FailureType.DUPLICATE_CLASS_SHADOWING }
 
         assertNotNull(dupFailure)
-        assertTrue(dupFailure.evidence?.duplicate?.identicalBytecode == true)
-        assertTrue(dupFailure.evidence?.duplicate?.riskLevel == DuplicateRiskLevel.BENIGN)
-        assertTrue(dupFailure.severity.name == "INFO")
+        assertEquals(dupFailure.evidence?.duplicate?.identicalBytecode, true)
+        assertEquals(dupFailure.evidence?.duplicate?.riskLevel, DuplicateRiskLevel.BENIGN)
+        assertEquals(dupFailure.severity.name, "INFO")
     }
 
     private fun buildJar(
@@ -164,7 +166,7 @@ class DuplicateImpactAnalyzerTest {
         val options = mutableListOf("-g", "-d", outputDir.toString())
         if (classpath.isNotEmpty()) {
             options.add("-classpath")
-            options.add(classpath.joinToString(separator = System.getProperty("path.separator")) { it.toString() })
+            options.add(classpath.joinToString(separator = File.pathSeparator) { it.toString() })
         }
 
         val ok = compiler.getTask(null, fileManager, null, options, null, compilationUnits).call()

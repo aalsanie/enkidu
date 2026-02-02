@@ -520,7 +520,7 @@ class LinkageDoctorToolWindowPanel(
                 manifestFile = manifestPath?.let { Path.of(it) },
             )
 
-        object : Task.Backgroundable(project, "Enkidu Linkage Doctor", true) {
+        object : Task.Backgroundable(project, "Enkidu linkage doctor", true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
 
