@@ -276,7 +276,7 @@ object ReproBundleWriter {
             md.update(buf, 0, read)
         }
         return md.digest().joinToString(separator = "") {
-            "%02x\".format(it) }"
+            "%02x\\".format(it)
         }
     }
 
