@@ -21,8 +21,11 @@ package io.enkidu.core.resolve
 import io.enkidu.core.model.ClasspathEntry
 import io.enkidu.core.model.ClasspathEntryKind
 import io.enkidu.core.model.ClasspathSnapshot
+import io.enkidu.core.util.MultiReleaseSupport
+import io.enkidu.core.util.WarningCode
+import io.enkidu.core.util.WarningCollector
 import java.nio.file.Files
-import java.util.jar.JarFile
+import java.util.zip.ZipFile
 
 /**
  * Loads class file bytes from the runtime classpath snapshot.
@@ -31,6 +34,8 @@ import java.util.jar.JarFile
  */
 class ClasspathBytecodeLoader(
     private val snapshot: ClasspathSnapshot,
+    private val runtimeJavaFeature: Int = Runtime.version().feature(),
+    private val warnings: WarningCollector? = null,
 ) : AutoCloseable {
     override fun close() {
         // No-op: we open jars per lookup to avoid holding file handles on Windows.
@@ -66,21 +71,59 @@ class ClasspathBytecodeLoader(
                 }
 
                 is ClasspathEntry.Jar -> {
-                    JarFile(entry.path.toFile()).use { jar ->
-                        val je = jar.getJarEntry(resourcePath)
-                        if (je != null) {
-                            val bytes = jar.getInputStream(je).use { it.readBytes() }
-                            return ClassBytesWithLocation(
-                                bytes = bytes,
-                                location =
-                                    ClassLocation(
-                                        binaryName = binaryName,
-                                        entryKind = ClasspathEntryKind.JAR,
-                                        entryPath = entry.path,
+                    val jarPath = entry.path
+                    try {
+                        ZipFile(jarPath.toFile()).use { zip ->
+                            val isMr =
+                                try {
+                                    MultiReleaseSupport.isMultiRelease(zip)
+                                } catch (e: Exception) {
+                                    warnings?.warn(
+                                        code = WarningCode.MANIFEST_PARSE_FAILED,
+                                        message = "Failed to parse jar manifest (MRJAR detection): ${e.javaClass.simpleName}: ${e.message}",
+                                        path = jarPath,
+                                        jarEntry = "META-INF/MANIFEST.MF",
+                                    )
+                                    false
+                                }
+
+                            val effectiveEntry =
+                                try {
+                                    MultiReleaseSupport.effectiveEntryName(zip, resourcePath, runtimeJavaFeature, isMr)
+                                } catch (e: Exception) {
+                                    warnings?.warn(
+                                        code = WarningCode.IO_ERROR,
+                                        message = "Failed to locate class entry $resourcePath: ${e.javaClass.simpleName}: ${e.message}",
+                                        path = jarPath,
                                         jarEntry = resourcePath,
-                                    ),
-                            )
+                                    )
+                                    null
+                                }
+
+                            if (effectiveEntry != null) {
+                                val je = zip.getEntry(effectiveEntry)
+                                if (je != null && !je.isDirectory) {
+                                    val bytes = zip.getInputStream(je).use { it.readBytes() }
+                                    return ClassBytesWithLocation(
+                                        bytes = bytes,
+                                        location =
+                                            ClassLocation(
+                                                binaryName = binaryName,
+                                                entryKind = ClasspathEntryKind.JAR,
+                                                entryPath = jarPath,
+                                                jarEntry = effectiveEntry,
+                                            ),
+                                    )
+                                }
+                            }
                         }
+                    } catch (e: Exception) {
+                        warnings?.warn(
+                            code = WarningCode.UNREADABLE_JAR,
+                            message = "Unreadable jar while loading class $binaryName: ${e.javaClass.simpleName}: ${e.message}",
+                            path = jarPath,
+                            jarEntry = null,
+                        )
                     }
                 }
             }

@@ -20,13 +20,16 @@ package io.enkidu.core.resolve
 
 import io.enkidu.core.model.ClasspathSnapshot
 import io.enkidu.core.util.EnkiduNames
+import io.enkidu.core.util.MultiReleaseSupport
+import io.enkidu.core.util.WarningCode
+import io.enkidu.core.util.WarningCollector
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.ModuleVisitor
 import org.objectweb.asm.Opcodes
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.jar.JarFile
+import java.util.zip.ZipFile
 
 /**
  * Best-effort JPMS module metadata index.
@@ -41,10 +44,17 @@ class ModuleIndex private constructor(
     fun moduleFor(entryPath: Path): ModuleInfo? = byEntryPath[entryPath]
 
     companion object {
-        fun build(snapshot: ClasspathSnapshot): ModuleIndex {
+        fun build(snapshot: ClasspathSnapshot): ModuleIndex =
+            build(snapshot = snapshot, runtimeJavaFeature = Runtime.version().feature(), warnings = null)
+
+        fun build(
+            snapshot: ClasspathSnapshot,
+            runtimeJavaFeature: Int = Runtime.version().feature(),
+            warnings: WarningCollector? = null,
+        ): ModuleIndex {
             val map = linkedMapOf<Path, ModuleInfo>()
             for (entry in snapshot.entries) {
-                val info = readModuleInfo(entry.path)
+                val info = readModuleInfo(entry.path, runtimeJavaFeature = runtimeJavaFeature, warnings = warnings)
                 if (info != null) {
                     map[entry.path] = info
                 }
@@ -52,33 +62,104 @@ class ModuleIndex private constructor(
             return ModuleIndex(map.toMap())
         }
 
-        private fun readModuleInfo(path: Path): ModuleInfo? =
+        private fun readModuleInfo(
+            path: Path,
+            runtimeJavaFeature: Int,
+            warnings: WarningCollector?,
+        ): ModuleInfo? =
             when {
-                Files.isDirectory(path) -> readModuleInfoFromDir(path)
-                Files.isRegularFile(path) && path.toString().endsWith(".jar") -> readModuleInfoFromJar(path)
+                Files.isDirectory(path) -> readModuleInfoFromDir(path, warnings)
+                Files.isRegularFile(path) && path.toString().endsWith(".jar") -> readModuleInfoFromJar(path, runtimeJavaFeature, warnings)
                 else -> null
             }
 
-        private fun readModuleInfoFromDir(dir: Path): ModuleInfo? {
+        private fun readModuleInfoFromDir(
+            dir: Path,
+            warnings: WarningCollector?,
+        ): ModuleInfo? {
             val moduleInfoClass = dir.resolve("module-info.class")
             if (!Files.isRegularFile(moduleInfoClass)) return null
-            return parseModuleInfo(Files.readAllBytes(moduleInfoClass), automaticName = null)
+            return try {
+                parseModuleInfo(Files.readAllBytes(moduleInfoClass), automaticName = null)
+            } catch (e: Exception) {
+                warnings?.warn(
+                    code = WarningCode.MODULE_INFO_PARSE_FAILED,
+                    message = "Failed to parse module-info.class: ${e.javaClass.simpleName}: ${e.message}",
+                    path = moduleInfoClass,
+                    jarEntry = null,
+                )
+                null
+            }
         }
 
-        private fun readModuleInfoFromJar(jar: Path): ModuleInfo? {
-            JarFile(jar.toFile()).use { jf ->
-                val moduleEntry = jf.getJarEntry("module-info.class")
-                if (moduleEntry != null) {
-                    jf.getInputStream(moduleEntry).use { input ->
-                        return parseModuleInfo(input.readBytes(), automaticName = null)
+        private fun readModuleInfoFromJar(
+            jar: Path,
+            runtimeJavaFeature: Int,
+            warnings: WarningCollector?,
+        ): ModuleInfo? {
+            if (runtimeJavaFeature < 9) {
+                // JPMS does not exist pre-9.
+                return null
+            }
+
+            ZipFile(jar.toFile()).use { zip ->
+                val automatic =
+                    try {
+                        MultiReleaseSupport.manifestAttribute(zip, "Automatic-Module-Name")?.trim()
+                    } catch (e: Exception) {
+                        warnings?.warn(
+                            code = WarningCode.MANIFEST_PARSE_FAILED,
+                            message = "Failed to parse jar manifest (Automatic-Module-Name): ${e.javaClass.simpleName}: ${e.message}",
+                            path = jar,
+                            jarEntry = "META-INF/MANIFEST.MF",
+                        )
+                        null
+                    }
+
+                val isMr =
+                    try {
+                        MultiReleaseSupport.isMultiRelease(zip)
+                    } catch (e: Exception) {
+                        warnings?.warn(
+                            code = WarningCode.MANIFEST_PARSE_FAILED,
+                            message = "Failed to parse jar manifest (MRJAR detection): ${e.javaClass.simpleName}: ${e.message}",
+                            path = jar,
+                            jarEntry = "META-INF/MANIFEST.MF",
+                        )
+                        false
+                    }
+
+                val effectiveEntryName =
+                    try {
+                        MultiReleaseSupport.effectiveEntryName(zip, "module-info.class", runtimeJavaFeature, isMr)
+                    } catch (e: Exception) {
+                        warnings?.warn(
+                            code = WarningCode.IO_ERROR,
+                            message = "Failed to locate module-info.class: ${e.javaClass.simpleName}: ${e.message}",
+                            path = jar,
+                            jarEntry = "module-info.class",
+                        )
+                        null
+                    }
+
+                if (effectiveEntryName != null) {
+                    val je = zip.getEntry(effectiveEntryName)
+                    if (je != null && !je.isDirectory) {
+                        val bytes = zip.getInputStream(je).use { it.readBytes() }
+                        return try {
+                            parseModuleInfo(bytes, automaticName = null)
+                        } catch (e: Exception) {
+                            warnings?.warn(
+                                code = WarningCode.MODULE_INFO_PARSE_FAILED,
+                                message = "Failed to parse $effectiveEntryName: ${e.javaClass.simpleName}: ${e.message}",
+                                path = jar,
+                                jarEntry = effectiveEntryName,
+                            )
+                            null
+                        }
                     }
                 }
 
-                val automatic =
-                    jf.manifest
-                        ?.mainAttributes
-                        ?.getValue("Automatic-Module-Name")
-                        ?.trim()
                 if (!automatic.isNullOrBlank()) {
                     // Automatic modules export all packages. We still keep the name for reporting.
                     return ModuleInfo(

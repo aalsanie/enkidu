@@ -19,6 +19,7 @@
 package io.enkidu.export
 
 import io.enkidu.artifacts.v1.Evidence
+import io.enkidu.artifacts.v1.ExecutionContext
 import io.enkidu.artifacts.v1.FailureType
 import io.enkidu.artifacts.v1.Fingerprint
 import io.enkidu.artifacts.v1.Fingerprints
@@ -28,10 +29,12 @@ import io.enkidu.artifacts.v1.LinkageFailure
 import io.enkidu.artifacts.v1.LinkageReport
 import io.enkidu.artifacts.v1.ReferenceSite
 import io.enkidu.artifacts.v1.ReportSummary
+import io.enkidu.artifacts.v1.ScanWarning
 import io.enkidu.artifacts.v1.Severity
 import io.enkidu.artifacts.v1.SymbolId
 import io.enkidu.artifacts.v1.SymbolKind
 import io.enkidu.artifacts.v1.ToolMetadata
+import io.enkidu.artifacts.v1.WarningCode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
@@ -139,6 +142,22 @@ class HtmlWriterV1SnapshotTest {
                 ),
             summary = ReportSummary(failureCount = 0, failureCountByType = emptyMap()),
             failures = failures,
+            execution = ExecutionContext(runtimeJavaFeature = 21, continueOnError = true),
+            warnings =
+                listOf(
+                    ScanWarning(
+                        code = WarningCode.MANIFEST_PARSE_FAILED,
+                        message = "Failed to parse manifest; MRJAR flag may be ignored",
+                        path = "/abs/cp/bad.jar",
+                        jarEntry = "META-INF/MANIFEST.MF",
+                    ),
+                    ScanWarning(
+                        code = WarningCode.INVALID_BYTECODE,
+                        message = "Invalid classfile (ASM parse failed)",
+                        path = "/abs/cp/bad.jar",
+                        jarEntry = "demo/Broken.class",
+                    ),
+                ),
         )
     }
 }

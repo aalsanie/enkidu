@@ -26,6 +26,8 @@ data class LinkageDoctorCompareRequest(
     val targets: List<Path>,
     val classpathA: List<Path>,
     val classpathB: List<Path>,
+    val runtimeJavaFeature: Int? = null,
+    val continueOnError: Boolean = false,
     val labelA: String = "A",
     val labelB: String = "B",
     val performance: PerformanceOptions = PerformanceOptions(),

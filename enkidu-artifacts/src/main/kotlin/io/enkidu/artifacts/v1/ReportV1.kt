@@ -29,6 +29,8 @@ data class LinkageReport(
     val fingerprints: Fingerprints,
     val summary: ReportSummary,
     val failures: List<LinkageFailure>,
+    val execution: ExecutionContext? = null,
+    val warnings: List<ScanWarning>? = null,
 ) {
     /** Returns a canonicalized copy suitable for JSON output. */
     fun canonical(): LinkageReport =
@@ -38,8 +40,43 @@ data class LinkageReport(
                     .map { it.canonical() }
                     .sortedWith(LinkageFailure.CANONICAL_ORDER),
             summary = summary.canonicalizedFor(failures),
+            warnings = warnings?.canonicalWarnings(),
         )
 }
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class ExecutionContext(
+    val runtimeJavaFeature: Int,
+    val continueOnError: Boolean,
+)
+
+enum class WarningCode {
+    UNREADABLE_JAR,
+    MANIFEST_PARSE_FAILED,
+    INVALID_BYTECODE,
+    MODULE_INFO_PARSE_FAILED,
+    IO_ERROR,
+}
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class ScanWarning(
+    val code: WarningCode,
+    val message: String,
+    /** Absolute, normalized path when known. */
+    val path: String? = null,
+    /** Jar entry name (or relative path within a directory target) when known. */
+    val jarEntry: String? = null,
+)
+
+private fun List<ScanWarning>.canonicalWarnings(): List<ScanWarning> =
+    this
+        .distinct()
+        .sortedWith(
+            compareBy<ScanWarning> { it.code.name }
+                .thenBy { it.path ?: "" }
+                .thenBy { it.jarEntry ?: "" }
+                .thenBy { it.message },
+        )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class ToolMetadata(

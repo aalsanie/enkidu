@@ -35,6 +35,17 @@ sealed interface ClassResolutionOutcome {
         val location: ClassLocation,
     ) : ClassResolutionOutcome
 
+    /**
+     * The class bytes were found on the runtime classpath, but could not be parsed.
+     *
+     * This happens with corrupted jars, intentionally obfuscated/invalid bytecode, or tooling bugs.
+     */
+    data class Unparseable(
+        val binaryName: String,
+        val location: ClassLocation,
+        val message: String,
+    ) : ClassResolutionOutcome
+
     data class Missing(
         val binaryName: String,
     ) : ClassResolutionOutcome

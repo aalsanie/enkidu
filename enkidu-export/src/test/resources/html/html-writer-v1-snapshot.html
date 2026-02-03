@@ -13,15 +13,26 @@
     <div><span class="k">Resolver mode</span>: jvm-linkage-sim-v1</div>
     <div><span class="k">Classpath fingerprint</span>: <code>classpath-fp</code></div>
     <div><span class="k">Targets fingerprint</span>: <code>targets-fp</code></div>
+    <div><span class="k">Runtime Java feature</span>: 21</div>
+    <div><span class="k">Continue on error</span>: true</div>
   </div>
   <h2>Summary</h2>
   <p><span class="k">Failures</span>: 2</p>
+  <p><span class="k">Warnings</span>: 2</p>
   <h3>By type</h3>
   <table>
     <thead><tr><th>Type</th><th>Count</th></tr></thead>
     <tbody>
       <tr><td><code>MISSING_CLASS</code></td><td>1</td></tr>
       <tr><td><code>MISSING_METHOD</code></td><td>1</td></tr>
+    </tbody>
+  </table>
+  <h2>Warnings</h2>
+  <table>
+    <thead><tr><th>Code</th><th>Path</th><th>Entry</th><th>Message</th></tr></thead>
+    <tbody>
+      <tr><td><code>INVALID_BYTECODE</code></td><td><code>/abs/cp/bad.jar</code></td><td><code>demo/Broken.class</code></td><td>Invalid classfile (ASM parse failed)</td></tr>
+      <tr><td><code>MANIFEST_PARSE_FAILED</code></td><td><code>/abs/cp/bad.jar</code></td><td><code>META-INF/MANIFEST.MF</code></td><td>Failed to parse manifest; MRJAR flag may be ignored</td></tr>
     </tbody>
   </table>
   <h2>Failures</h2>

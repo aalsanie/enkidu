@@ -70,6 +70,11 @@ class LinkageFailureClassifier(
         val outcome = resolver.resolveClass(reference.symbol.owner)
         return when (outcome) {
             is ClassResolutionOutcome.Resolved -> null
+
+            is ClassResolutionOutcome.Unparseable -> {
+                null
+            }
+
             is ClassResolutionOutcome.Missing ->
                 buildFailure(
                     type = FailureType.MISSING_CLASS,
