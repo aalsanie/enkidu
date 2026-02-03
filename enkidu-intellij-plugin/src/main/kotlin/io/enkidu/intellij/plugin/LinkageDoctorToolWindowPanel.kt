@@ -24,6 +24,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.fileChooser.FileChooserFactory
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.progress.ProgressIndicator
@@ -33,6 +34,7 @@ import com.intellij.openapi.roots.CompilerModuleExtension
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.pom.Navigatable
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.search.GlobalSearchScope
@@ -50,8 +52,10 @@ import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
 import io.enkidu.artifacts.v1.EnkiduJson
+import io.enkidu.artifacts.v1.ExecutionContext
 import io.enkidu.artifacts.v1.LinkageFailure
 import io.enkidu.artifacts.v1.LinkageReport
+import io.enkidu.artifacts.v1.ScanWarning
 import io.enkidu.artifacts.v1.Severity
 import io.enkidu.artifacts.v1.ToolMetadata
 import io.enkidu.core.engine.LinkageDoctorEngine
@@ -116,10 +120,13 @@ class LinkageDoctorToolWindowPanel(
     private val details: JBTextArea
     private val classpathUsed: JBTextArea
     private val classpathFingerprintLabel: JBLabel
+    private val executionLabel: JBLabel
+    private val scanWarningsLabel: JBLabel
 
     // ----- State -----
     private var lastReport: LinkageReport? = null
     private var lastSelectedFailure: LinkageFailure? = null
+    private var lastSelectedWarning: ScanWarning? = null
     private var lastClasspathManifest: String? = null
 
     init {
@@ -186,9 +193,11 @@ class LinkageDoctorToolWindowPanel(
         details.isEditable = false
         details.lineWrap = true
         details.wrapStyleWord = true
-        details.emptyText.text = "Select a failure to see details. Double-click to navigate to the callsite."
+        details.emptyText.text = "Select a failure or scan warning to see details. Double-click a failure to navigate to the callsite."
 
         classpathFingerprintLabel = JBLabel("Classpath fingerprint: (not resolved)")
+        executionLabel = JBLabel("Execution: (not resolved)")
+        scanWarningsLabel = JBLabel("Scan warnings: 0")
         classpathUsed = JBTextArea()
         classpathUsed.isEditable = false
         classpathUsed.lineWrap = false
@@ -349,7 +358,14 @@ class LinkageDoctorToolWindowPanel(
     private fun buildClasspathTab(): JComponent =
         JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(8)
-            add(classpathFingerprintLabel, BorderLayout.NORTH)
+            val meta =
+                JPanel().apply {
+                    layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
+                    add(classpathFingerprintLabel)
+                    add(executionLabel)
+                    add(scanWarningsLabel)
+                }
+            add(meta, BorderLayout.NORTH)
             add(ScrollPaneFactory.createScrollPane(classpathUsed, true), BorderLayout.CENTER)
         }
 
@@ -428,9 +444,15 @@ class LinkageDoctorToolWindowPanel(
                 val userObject = node.userObject
                 if (userObject is LinkageFailure) {
                     lastSelectedFailure = userObject
+                    lastSelectedWarning = null
                     details.text = renderFailureDetails(userObject)
+                } else if (userObject is ScanWarning) {
+                    lastSelectedFailure = null
+                    lastSelectedWarning = userObject
+                    details.text = renderWarningDetails(userObject)
                 } else {
                     lastSelectedFailure = null
+                    lastSelectedWarning = null
                     details.text = ""
                 }
                 updateButtonsEnabledState()
@@ -443,8 +465,12 @@ class LinkageDoctorToolWindowPanel(
                     if (e.clickCount != 2) return
                     val path = tree.getPathForLocation(e.x, e.y) ?: return
                     val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return
-                    val failure = node.userObject as? LinkageFailure ?: return
-                    navigateToReferenceSite(failure)
+                    val uo = node.userObject
+                    when (uo) {
+                        is LinkageFailure -> navigateToReferenceSite(uo)
+                        is ScanWarning -> navigateToWarning(uo)
+                        else -> return
+                    }
                 }
             },
         )
@@ -543,6 +569,10 @@ class LinkageDoctorToolWindowPanel(
                     classpathUsed.text = resolved.manifestText
                     val fp = ClasspathFingerprint.sha256Hex(resolved.manifestText)
                     classpathFingerprintLabel.text = "Classpath fingerprint (sha256): $fp"
+
+                    executionLabel.text = "Execution: ${executionSummary(report.execution)}"
+                    val wCount = report.warnings?.size ?: 0
+                    scanWarningsLabel.text = "Scan warnings: $wCount"
 
                     renderReport(report)
                     updateStatus(report)
@@ -650,10 +680,36 @@ class LinkageDoctorToolWindowPanel(
     }
 
     private fun renderReport(report: LinkageReport) {
-        val root = DefaultMutableTreeNode("Failures (${report.failures.size})")
+        val root = DefaultMutableTreeNode("Report")
 
+        // --- Execution ---
+        root.add(DefaultMutableTreeNode("Execution: ${executionSummary(report.execution)}"))
+
+        // --- Scan warnings ---
+        val warnings = report.warnings.orEmpty()
+        val warningsNode = DefaultMutableTreeNode("Scan warnings (${warnings.size})")
+        if (warnings.isEmpty()) {
+            warningsNode.add(DefaultMutableTreeNode("No scan warnings."))
+        } else {
+            val byCode = warnings.groupBy { it.code }
+            byCode.toSortedMap(compareBy { it.name }).forEach { (code, ws) ->
+                val codeNode = DefaultMutableTreeNode("${code.name} (${ws.size})")
+                ws
+                    .distinct()
+                    .sortedWith(
+                        compareBy<ScanWarning> { it.path ?: "" }
+                            .thenBy { it.jarEntry ?: "" }
+                            .thenBy { it.message },
+                    ).forEach { w -> codeNode.add(DefaultMutableTreeNode(w)) }
+                warningsNode.add(codeNode)
+            }
+        }
+        root.add(warningsNode)
+
+        // --- Failures ---
+        val failuresNode = DefaultMutableTreeNode("Failures (${report.failures.size})")
         if (report.failures.isEmpty()) {
-            root.add(DefaultMutableTreeNode("No linkage failures found."))
+            failuresNode.add(DefaultMutableTreeNode("No linkage failures found."))
         } else {
             val grouped = report.failures.groupBy { it.type }
             grouped.toSortedMap(compareBy { it.name }).forEach { (type, failures) ->
@@ -663,9 +719,10 @@ class LinkageDoctorToolWindowPanel(
                     .forEach { failure ->
                         typeNode.add(DefaultMutableTreeNode(failure))
                     }
-                root.add(typeNode)
+                failuresNode.add(typeNode)
             }
         }
+        root.add(failuresNode)
 
         treeModel.setRoot(root)
         treeModel.reload()
@@ -676,6 +733,7 @@ class LinkageDoctorToolWindowPanel(
 
         details.text = ""
         lastSelectedFailure = null
+        lastSelectedWarning = null
         updateButtonsEnabledState()
     }
 
@@ -744,6 +802,45 @@ class LinkageDoctorToolWindowPanel(
         return sb.toString()
     }
 
+    private fun renderWarningDetails(w: ScanWarning): String {
+        val sb = StringBuilder()
+        sb.appendLine("SCAN WARNING • ${w.code.name}")
+        sb.appendLine(w.message)
+        sb.appendLine()
+
+        if (!w.path.isNullOrBlank()) sb.appendLine("Path: ${w.path}")
+        if (!w.jarEntry.isNullOrBlank()) sb.appendLine("Jar entry: ${w.jarEntry}")
+
+        if (w.path.isNullOrBlank()) {
+            sb.appendLine()
+            sb.appendLine("(No path available for navigation.)")
+        }
+        return sb.toString()
+    }
+
+    private fun executionSummary(exec: ExecutionContext?): String {
+        if (exec == null) return "default (not reported)"
+        return "runtimeJavaFeature=${exec.runtimeJavaFeature}, continueOnError=${exec.continueOnError}"
+    }
+
+    private fun navigateToWarning(w: ScanWarning) {
+        val p = w.path?.trim().orEmpty()
+        if (p.isEmpty()) {
+            notify("Navigation unavailable", "No path for this warning.", NotificationType.INFORMATION)
+            return
+        }
+        val vf = LocalFileSystem.getInstance().findFileByPath(p)
+        if (vf == null) {
+            notify("Navigation unavailable", "Could not locate: $p", NotificationType.INFORMATION)
+            return
+        }
+
+        val descriptor = OpenFileDescriptor(project, vf, 0, 0)
+        if (descriptor.canNavigate()) {
+            descriptor.navigate(true)
+        }
+    }
+
     private fun navigateToReferenceSite(failure: LinkageFailure) {
         val line = failure.referenceSite.line
         if (line == null) {
@@ -782,6 +879,7 @@ class LinkageDoctorToolWindowPanel(
         val any = report.failures.size
         val errors = report.failures.count { it.severity == Severity.ERROR }
         val warns = report.failures.count { it.severity == Severity.WARN }
+        val scanWarnings = report.warnings?.size ?: 0
 
         val policy = (failOnCombo.selectedItem as? FailOnPolicy) ?: FailOnPolicy.ANY
         val failed =
@@ -792,9 +890,9 @@ class LinkageDoctorToolWindowPanel(
 
         statusLabel.text =
             if (failed) {
-                "FAILED • Failures: $any (errors=$errors, warnings=$warns)"
+                "FAILED • Failures: $any (errors=$errors, warnings=$warns) • Scan warnings: $scanWarnings"
             } else {
-                "OK • Failures: $any (errors=$errors, warnings=$warns)"
+                "OK • Failures: $any (errors=$errors, warnings=$warns) • Scan warnings: $scanWarnings"
             }
     }
 
@@ -802,6 +900,7 @@ class LinkageDoctorToolWindowPanel(
         val any = report.failures.size
         val errors = report.failures.count { it.severity == Severity.ERROR }
         val warns = report.failures.count { it.severity == Severity.WARN }
+        val scanWarnings = report.warnings?.size ?: 0
 
         val policy = (failOnCombo.selectedItem as? FailOnPolicy) ?: FailOnPolicy.ANY
         val failed =
@@ -810,7 +909,7 @@ class LinkageDoctorToolWindowPanel(
                 FailOnPolicy.ERROR_ONLY -> errors > 0
             }
 
-        val msg = "Failures: $any (errors=$errors, warnings=$warns)"
+        val msg = "Failures: $any (errors=$errors, warnings=$warns). Scan warnings: $scanWarnings"
         return if (failed) {
             Triple("Scan finished (FAILED)", msg, NotificationType.ERROR)
         } else {
@@ -821,11 +920,14 @@ class LinkageDoctorToolWindowPanel(
     private fun clearResults() {
         lastReport = null
         lastSelectedFailure = null
+        lastSelectedWarning = null
         lastClasspathManifest = null
 
         statusLabel.text = "Configure and run a scan."
         classpathUsed.text = ""
         classpathFingerprintLabel.text = "Classpath fingerprint: (not resolved)"
+        executionLabel.text = "Execution: (not resolved)"
+        scanWarningsLabel.text = "Scan warnings: 0"
         details.text = ""
 
         treeModel.setRoot(DefaultMutableTreeNode("Run a scan"))

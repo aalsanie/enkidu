@@ -23,11 +23,13 @@ import io.enkidu.artifacts.v1.CompareReport
 import io.enkidu.artifacts.v1.CompareSummary
 import io.enkidu.artifacts.v1.ComparedClasspaths
 import io.enkidu.artifacts.v1.EnkiduFingerprints
+import io.enkidu.artifacts.v1.ExecutionContext
 import io.enkidu.artifacts.v1.Fingerprint
 import io.enkidu.artifacts.v1.Fingerprints
 import io.enkidu.artifacts.v1.LinkageFailure
 import io.enkidu.artifacts.v1.LinkageReport
 import io.enkidu.artifacts.v1.ReportSummary
+import io.enkidu.artifacts.v1.ScanWarning
 import io.enkidu.artifacts.v1.SymbolKind
 import io.enkidu.artifacts.v1.WinnerChange
 import io.enkidu.core.dup.DuplicateImpactAnalyzer
@@ -41,6 +43,7 @@ import io.enkidu.core.resolve.ModuleIndex
 import io.enkidu.core.scan.BytecodeReference
 import io.enkidu.core.scan.TargetReferenceScanner
 import io.enkidu.core.spi.SpiValidator
+import io.enkidu.core.util.WarningCollector
 import java.nio.file.Path
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
@@ -50,6 +53,8 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
+import io.enkidu.artifacts.v1.WarningCode as ArtifactWarningCode
+import io.enkidu.core.util.WarningCode as CoreWarningCode
 
 /**
  * Headless, deterministic engine entrypoint.
@@ -67,13 +72,17 @@ class LinkageDoctorEngine(
         require(request.runtimeClasspath.isNotEmpty()) { "runtimeClasspath must not be empty." }
 
         val perf = request.performance
-        val jarScanParallelism = perf.jarScanParallelism ?: 1
+        val jarScanParallelism = perf.jarScanParallelism
+        val runtimeJavaFeature = request.runtimeJavaFeature ?: Runtime.version().feature()
+        val continueOnError = request.continueOnError
+
+        val warnings = WarningCollector()
 
         val snapshot = ClasspathSnapshot.fromPaths(request.runtimeClasspath)
-        val moduleIndex = ModuleIndex.build(snapshot)
+        val moduleIndex = ModuleIndex.build(snapshot, runtimeJavaFeature = runtimeJavaFeature, warnings = warnings)
 
         val jarScanCache = perf.jarScanCacheDir?.let { FileJarScanCache(it) }
-        val jarScans = JarScanRepository(cache = jarScanCache)
+        val jarScans = JarScanRepository(cache = jarScanCache, runtimeJavaFeature = runtimeJavaFeature, warnings = warnings)
         val jarIndex =
             JarIndex.build(
                 snapshot = snapshot,
@@ -86,9 +95,21 @@ class LinkageDoctorEngine(
         val callersByCallee = ConcurrentHashMap<MethodId, ConcurrentSkipListSet<MethodId>>()
 
         val allFailures: List<LinkageFailure> =
-            JvmLinkageResolver(snapshot).use { resolver ->
+            JvmLinkageResolver(
+                snapshot,
+                runtimeJavaFeature = runtimeJavaFeature,
+                continueOnError = continueOnError,
+                warnings = warnings,
+            ).use { resolver ->
                 val accessChecker = AccessChecker(resolver = resolver, moduleIndex = moduleIndex)
                 val classifier = LinkageFailureClassifier(snapshot, accessChecker, jarIndex)
+
+                val scanOptions =
+                    TargetReferenceScanner.Options(
+                        runtimeJavaFeature = runtimeJavaFeature,
+                        continueOnError = continueOnError,
+                        warnings = warnings,
+                    )
 
                 scanTargetsBoundedParallel(
                     targets = request.targets,
@@ -98,6 +119,7 @@ class LinkageDoctorEngine(
                     referencedBinaryClasses = referencedBinaryClasses,
                     callersByCallee = callersByCallee,
                     failures = failures,
+                    options = scanOptions,
                 )
 
                 val callGraph =
@@ -127,6 +149,8 @@ class LinkageDoctorEngine(
                     ),
                 summary = ReportSummary(failureCount = 0, failureCountByType = emptyMap()),
                 failures = allFailures,
+                execution = ExecutionContext(runtimeJavaFeature = runtimeJavaFeature, continueOnError = continueOnError),
+                warnings = warnings.snapshotSorted().toArtifactsWarnings(),
             )
 
         return report.canonical()
@@ -148,6 +172,8 @@ class LinkageDoctorEngine(
                     tool = request.tool,
                     targets = request.targets,
                     runtimeClasspath = request.classpathA,
+                    runtimeJavaFeature = request.runtimeJavaFeature,
+                    continueOnError = request.continueOnError,
                     performance = request.performance,
                 ),
             )
@@ -158,6 +184,8 @@ class LinkageDoctorEngine(
                     tool = request.tool,
                     targets = request.targets,
                     runtimeClasspath = request.classpathB,
+                    runtimeJavaFeature = request.runtimeJavaFeature,
+                    continueOnError = request.continueOnError,
                     performance = request.performance,
                 ),
             )
@@ -183,6 +211,8 @@ class LinkageDoctorEngine(
                 classpathA = request.classpathA,
                 classpathB = request.classpathB,
                 perf = request.performance,
+                runtimeJavaFeature = request.runtimeJavaFeature ?: Runtime.version().feature(),
+                continueOnError = request.continueOnError,
             )
 
         val summary =
@@ -234,8 +264,9 @@ class LinkageDoctorEngine(
         referencedBinaryClasses: MutableSet<String>,
         callersByCallee: ConcurrentHashMap<MethodId, ConcurrentSkipListSet<MethodId>>,
         failures: ConcurrentLinkedQueue<LinkageFailure>,
+        options: TargetReferenceScanner.Options,
     ) {
-        val parallelism = perf.targetScanParallelism ?: 1
+        val parallelism = perf.targetScanParallelism
         require(parallelism >= 1) { "targetScanParallelism must be >= 1" }
 
         fun consumeReference(ref: BytecodeReference) {
@@ -255,13 +286,13 @@ class LinkageDoctorEngine(
         }
 
         if (parallelism == 1) {
-            targetScanner.scanTargetsStreaming(targets) { consumeReference(it) }
+            targetScanner.scanTargetsStreaming(targets, options) { consumeReference(it) }
             return
         }
 
         val maxInFlight =
             when {
-                (perf.maxInFlightTargetClasses ?: 0) > 0 -> perf.maxInFlightTargetClasses!!
+                perf.maxInFlightTargetClasses != null -> perf.maxInFlightTargetClasses
                 else -> parallelism * 2
             }
 
@@ -272,12 +303,25 @@ class LinkageDoctorEngine(
 
         try {
             // Stream class bytes (bounded), submit scan+classify tasks.
-            targetScanner.forEachTargetClassBytes(targets) { bytes ->
+            targetScanner.forEachTargetClassBytes(targets, options) { src ->
                 permits.acquire()
                 completion.submit(
                     Callable<Unit> {
                         try {
-                            val refs = targetScanner.bytecodeScanner.scanClassBytes(bytes)
+                            val refs =
+                                try {
+                                    targetScanner.bytecodeScanner.scanClassBytes(src.bytes)
+                                } catch (e: Exception) {
+                                    options.warnings?.warn(
+                                        code = CoreWarningCode.INVALID_BYTECODE,
+                                        message = "Failed to parse target class bytes: ${e.javaClass.simpleName}: ${e.message}",
+                                        path = src.sourcePath,
+                                        jarEntry = src.jarEntry,
+                                    )
+                                    if (!options.continueOnError) throw e
+                                    emptyList()
+                                }
+
                             for (r in refs) consumeReference(r)
                         } finally {
                             permits.release()
@@ -363,21 +407,30 @@ class LinkageDoctorEngine(
         classpathA: List<Path>,
         classpathB: List<Path>,
         perf: PerformanceOptions,
+        runtimeJavaFeature: Int = Runtime.version().feature(),
+        continueOnError: Boolean = false,
     ): List<WinnerChange> {
         val snapshotA = ClasspathSnapshot.fromPaths(classpathA)
         val snapshotB = ClasspathSnapshot.fromPaths(classpathB)
 
-        val jarScanParallelism = perf.jarScanParallelism ?: 1
+        val jarScanParallelism = perf.jarScanParallelism
         val jarScanCache = perf.jarScanCacheDir?.let { FileJarScanCache(it) }
-        val jarScans = JarScanRepository(cache = jarScanCache)
+        val jarScans = JarScanRepository(cache = jarScanCache, runtimeJavaFeature = runtimeJavaFeature, warnings = null)
 
         val jarA = JarIndex.build(snapshotA, jarScans, jarScanParallelism)
         val jarB = JarIndex.build(snapshotB, jarScans, jarScanParallelism)
 
         val interesting = ConcurrentHashMap.newKeySet<String>()
 
+        val scanOptions =
+            TargetReferenceScanner.Options(
+                runtimeJavaFeature = runtimeJavaFeature,
+                continueOnError = continueOnError,
+                warnings = null,
+            )
+
         // Stream references (no in-memory list) to compute which classes are worth checking.
-        targetScanner.scanTargetsStreaming(targets) { ref ->
+        targetScanner.scanTargetsStreaming(targets, scanOptions) { ref ->
             interesting.add(ref.site.callerClass.replace('/', '.'))
             interesting.add(ref.symbol.owner.replace('/', '.'))
         }
@@ -393,4 +446,27 @@ class LinkageDoctorEngine(
 
         return changes.sortedBy { it.className }
     }
+
+    private fun List<io.enkidu.core.util.ScanWarning>.toArtifactsWarnings(): List<ScanWarning>? {
+        if (isEmpty()) return null
+        return this
+            .map {
+                ScanWarning(
+                    code = it.code.toArtifactsWarningCode(),
+                    message = it.message,
+                    path = it.path,
+                    jarEntry = it.jarEntry,
+                )
+            }.distinct()
+            .sortedWith(compareBy<ScanWarning> { it.code.name }.thenBy { it.path ?: "" }.thenBy { it.jarEntry ?: "" }.thenBy { it.message })
+    }
+
+    private fun CoreWarningCode.toArtifactsWarningCode(): ArtifactWarningCode =
+        when (this) {
+            CoreWarningCode.UNREADABLE_JAR -> ArtifactWarningCode.UNREADABLE_JAR
+            CoreWarningCode.MANIFEST_PARSE_FAILED -> ArtifactWarningCode.MANIFEST_PARSE_FAILED
+            CoreWarningCode.INVALID_BYTECODE -> ArtifactWarningCode.INVALID_BYTECODE
+            CoreWarningCode.MODULE_INFO_PARSE_FAILED -> ArtifactWarningCode.MODULE_INFO_PARSE_FAILED
+            CoreWarningCode.IO_ERROR -> ArtifactWarningCode.IO_ERROR
+        }
 }

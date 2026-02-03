@@ -35,6 +35,17 @@ data class LinkageDoctorRequest(
     val targets: List<Path>,
     /** Runtime classpath entries (directories or jars) in JVM resolution order. */
     val runtimeClasspath: List<Path>,
+    /**
+     * Controls Multi-Release JAR effective entry selection.
+     *
+     * If null, defaults to the current JVM's feature version.
+     */
+    val runtimeJavaFeature: Int? = null,
+    /**
+     * When true will continue scanning/resolution on non-fatal issues
+     * (invalid bytecode, unreadable jars) and record warnings in the report.
+     */
+    val continueOnError: Boolean = false,
     /** Performance and caching options (explicit, opt-in). */
     val performance: PerformanceOptions = PerformanceOptions(),
 )

@@ -24,6 +24,7 @@ import io.enkidu.artifacts.v1.FailureType
 import io.enkidu.artifacts.v1.FixPlanItem
 import io.enkidu.artifacts.v1.LinkageFailure
 import io.enkidu.artifacts.v1.LinkageReport
+import io.enkidu.artifacts.v1.ScanWarning
 import io.enkidu.artifacts.v1.Severity
 import java.nio.charset.StandardCharsets
 
@@ -107,12 +108,28 @@ internal object HtmlWriterV1 {
         sb.append("    <div><span class=\"k\">Targets fingerprint</span>: <code>")
         sb.append(HtmlEscaper.escape(report.fingerprints.targets.value))
         sb.append("</code></div>\n")
+
+        if (report.execution != null) {
+            sb.append("    <div><span class=\"k\">Runtime Java feature</span>: ")
+            sb.append(report.execution!!.runtimeJavaFeature)
+            sb.append("</div>\n")
+            sb.append("    <div><span class=\"k\">Continue on error</span>: ")
+            sb.append(report.execution!!.continueOnError)
+            sb.append("</div>\n")
+        }
         sb.append("  </div>\n")
 
         sb.append("  <h2>Summary</h2>\n")
         sb.append("  <p><span class=\"k\">Failures</span>: ")
         sb.append(report.summary.failureCount)
         sb.append("</p>\n")
+
+        val warnings = report.warnings.orEmpty()
+        if (warnings.isNotEmpty()) {
+            sb.append("  <p><span class=\"k\">Warnings</span>: ")
+            sb.append(warnings.size)
+            sb.append("</p>\n")
+        }
 
         sb.append("  <h3>By type</h3>\n")
         if (report.summary.failureCountByType.isEmpty()) {
@@ -130,6 +147,11 @@ internal object HtmlWriterV1 {
             }
             sb.append("    </tbody>\n")
             sb.append("  </table>\n")
+        }
+
+        if (warnings.isNotEmpty()) {
+            sb.append("  <h2>Warnings</h2>\n")
+            sb.append(renderWarnings(warnings))
         }
 
         sb.append("  <h2>Failures</h2>\n")
@@ -208,6 +230,27 @@ internal object HtmlWriterV1 {
         sb.append("</body>\n")
         sb.append("</html>")
         return sb.toString().toByteArray(StandardCharsets.UTF_8)
+    }
+
+    private fun renderWarnings(warnings: List<ScanWarning>): String {
+        val sb = StringBuilder(512)
+        sb.append("  <table>\n")
+        sb.append("    <thead><tr><th>Code</th><th>Path</th><th>Entry</th><th>Message</th></tr></thead>\n")
+        sb.append("    <tbody>\n")
+        for (w in warnings) {
+            sb.append("      <tr><td><code>")
+            sb.append(HtmlEscaper.escape(w.code.name))
+            sb.append("</code></td><td><code>")
+            sb.append(HtmlEscaper.escape(w.path ?: ""))
+            sb.append("</code></td><td><code>")
+            sb.append(HtmlEscaper.escape(w.jarEntry ?: ""))
+            sb.append("</code></td><td>")
+            sb.append(HtmlEscaper.escape(w.message))
+            sb.append("</td></tr>\n")
+        }
+        sb.append("    </tbody>\n")
+        sb.append("  </table>\n")
+        return sb.toString()
     }
 
     private fun badgeClass(severity: Severity): String =
@@ -377,9 +420,24 @@ internal object SarifWriterV1 {
                                 "name" to report.tool.name,
                                 "version" to report.tool.version,
                                 "rules" to rules,
+                                "properties" to
+                                    linkedMapOf(
+                                        "resolverMode" to report.tool.resolverMode,
+                                        "fingerprintClasspath" to report.fingerprints.classpath.value,
+                                        "fingerprintTargets" to report.fingerprints.targets.value,
+                                        "runtimeJavaFeature" to report.execution?.runtimeJavaFeature,
+                                        "continueOnError" to report.execution?.continueOnError,
+                                    ).filterValues { it != null },
                             ),
                     ),
                 "results" to results,
+                "invocations" to
+                    listOf(
+                        linkedMapOf(
+                            "executionSuccessful" to true,
+                            "toolExecutionNotifications" to sarifNotifications(report),
+                        ),
+                    ),
                 "properties" to
                     linkedMapOf(
                         "toolName" to report.tool.name,
@@ -387,6 +445,8 @@ internal object SarifWriterV1 {
                         "resolverMode" to report.tool.resolverMode,
                         "fingerprintClasspath" to report.fingerprints.classpath.value,
                         "fingerprintTargets" to report.fingerprints.targets.value,
+                        "runtimeJavaFeature" to report.execution?.runtimeJavaFeature,
+                        "continueOnError" to report.execution?.continueOnError,
                     ),
             )
 
@@ -398,6 +458,24 @@ internal object SarifWriterV1 {
             )
 
         return EnkiduJson.prettyWriter.writeValueAsBytes(sarif)
+    }
+
+    private fun sarifNotifications(report: LinkageReport): List<Map<String, Any?>> {
+        val warnings = report.warnings.orEmpty()
+        if (warnings.isEmpty()) return emptyList()
+
+        return warnings.map { w ->
+            linkedMapOf(
+                "level" to "warning",
+                "message" to linkedMapOf("text" to "${w.code.name}: ${w.message}"),
+                "properties" to
+                    linkedMapOf(
+                        "code" to w.code.name,
+                        "path" to w.path,
+                        "jarEntry" to w.jarEntry,
+                    ).filterValues { it != null },
+            )
+        }
     }
 
     private fun sarifLevel(severity: Severity): String =

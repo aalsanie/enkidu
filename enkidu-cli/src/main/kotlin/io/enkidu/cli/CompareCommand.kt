@@ -79,6 +79,25 @@ class CompareCommand : Runnable {
     var out: Path? = null
 
     @CommandLine.Option(
+        names = ["--runtime-java-feature"],
+        defaultValue = "0",
+        description = [
+            "Override Java feature version used for Multi-Release JAR selection.",
+            "0 means use the current JVM's feature version.",
+        ],
+    )
+    var runtimeJavaFeature: Int = 0
+
+    @CommandLine.Option(
+        names = ["--continue-on-error"],
+        description = [
+            "Best-effort scan: continue on invalid bytecode/unreadable jars and record warnings in the report.",
+            "Default is fail-fast.",
+        ],
+    )
+    var continueOnError: Boolean = false
+
+    @CommandLine.Option(
         names = ["--jar-scan-cache-dir"],
         description = [
             "Enable the jar scanning cache by providing a directory.",
@@ -123,6 +142,8 @@ class CompareCommand : Runnable {
                     targets = targets,
                     classpathA = cpA,
                     classpathB = cpB,
+                    runtimeJavaFeature = runtimeJavaFeature.takeIf { it > 0 },
+                    continueOnError = continueOnError,
                     labelA = labelA,
                     labelB = labelB,
                     performance =

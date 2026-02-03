@@ -18,8 +18,12 @@
  */
 package io.enkidu.core.perf
 
+import io.enkidu.core.util.MultiReleaseSupport
+import io.enkidu.core.util.WarningCode
+import io.enkidu.core.util.WarningCollector
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.lang.Runtime
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -34,6 +38,8 @@ import java.util.zip.ZipFile
  */
 class JarScanRepository(
     private val cache: JarScanCache? = null,
+    private val runtimeJavaFeature: Int = Runtime.version().feature(),
+    private val warnings: WarningCollector? = null,
 ) {
     private val byJarPath: ConcurrentHashMap<Path, JarScanData> = ConcurrentHashMap()
 
@@ -61,11 +67,25 @@ class JarScanRepository(
         jarPath: Path,
         sha256: String,
     ): JarScanData {
-        val classes = mutableListOf<String>()
-        val services = linkedMapOf<String, MutableSet<String>>()
+        val bestClassByLogical = mutableMapOf<String, Pair<Int, String>>()
+        val bestServiceByName = mutableMapOf<String, Pair<Int, List<String>>>()
 
         try {
             ZipFile(jarPath.toFile()).use { zip ->
+                val isMr =
+                    try {
+                        MultiReleaseSupport.isMultiRelease(zip)
+                    } catch (e: Exception) {
+                        // Treat as non-MR but surface a warning for supportability.
+                        warnings?.warn(
+                            code = WarningCode.MANIFEST_PARSE_FAILED,
+                            message = "Failed to parse jar manifest (MRJAR detection): ${e.javaClass.simpleName}: ${e.message}",
+                            path = jarPath,
+                            jarEntry = "META-INF/MANIFEST.MF",
+                        )
+                        false
+                    }
+
                 // Deterministic: sort by entry name.
                 val entries =
                     zip
@@ -77,31 +97,124 @@ class JarScanRepository(
 
                 for (e in entries) {
                     val name = e.name
-                    if (name.endsWith(".class") && !name.startsWith("META-INF/")) {
-                        val binary = name.removeSuffix(".class").replace('/', '.')
-                        classes.add(binary)
+
+                    // ---- Classes (MR-aware, effective view) ----
+                    if (name.endsWith(".class")) {
+                        val (ver, logical) =
+                            MultiReleaseSupport.parseVersionedName(name)?.let { (v, l) ->
+                                if (!isMr || runtimeJavaFeature < 9) return@let null
+                                if (v < 9 || v > runtimeJavaFeature) return@let null
+                                v to l
+                            } ?: (0 to name)
+
+                        // Do not index module-info as a normal type.
+                        if (logical == "module-info.class") continue
+
+                        // Preserve previous behavior: ignore META-INF/* *logical* classes.
+                        if (logical.startsWith("META-INF/")) continue
+
+                        val prev = bestClassByLogical[logical]
+                        if (prev == null || ver > prev.first || (ver == prev.first && name < prev.second)) {
+                            bestClassByLogical[logical] = ver to name
+                        }
                         continue
                     }
 
-                    if (name.startsWith(SERVICES_PREFIX) && name.length > SERVICES_PREFIX.length) {
-                        val service = name.removePrefix(SERVICES_PREFIX)
-                        val providers = parseProviders(zip.getInputStream(e))
-                        if (providers.isNotEmpty()) {
-                            val set = services.getOrPut(service) { linkedSetOf() }
-                            set.addAll(providers)
+                    // ---- Services (MR-aware, effective view) ----
+                    //
+                    // Only index:
+                    //   - base META-INF/services/*
+                    //   - or MR-eligible versioned META-INF/versions/<n>/META-INF/services/*
+                    // Never fall back to treating META-INF/versions/... as a service name.
+                    run {
+                        // Base service descriptor
+                        if (name.startsWith(SERVICES_PREFIX) && name.length > SERVICES_PREFIX.length) {
+                            val service = name.removePrefix(SERVICES_PREFIX)
+
+                            val providers =
+                                try {
+                                    parseProviders(zip.getInputStream(e))
+                                } catch (ex: Exception) {
+                                    warnings?.warn(
+                                        code = WarningCode.IO_ERROR,
+                                        message = "Failed to read META-INF/services/$service: ${ex.javaClass.simpleName}: ${ex.message}",
+                                        path = jarPath,
+                                        jarEntry = name,
+                                    )
+                                    emptyList()
+                                }
+
+                            val prev = bestServiceByName[service]
+                            val ver = 0
+                            if (prev == null ||
+                                ver > prev.first ||
+                                (ver == prev.first && providers.joinToString("\n") < prev.second.joinToString("\n"))
+                            ) {
+                                bestServiceByName[service] = ver to providers
+                            }
+                            return@run
+                        }
+
+                        // Versioned MR service descriptor
+                        val parsed = MultiReleaseSupport.parseVersionedName(name) ?: return@run
+                        val (v, logical) = parsed
+
+                        // Only accept if this is a versioned *service* entry and MR-eligible.
+                        if (!logical.startsWith(SERVICES_PREFIX) || logical.length <= SERVICES_PREFIX.length) return@run
+                        if (!isMr || runtimeJavaFeature < 9) return@run
+                        if (v < 9 || v > runtimeJavaFeature) return@run
+
+                        val service = logical.removePrefix(SERVICES_PREFIX)
+
+                        val providers =
+                            try {
+                                parseProviders(zip.getInputStream(e))
+                            } catch (ex: Exception) {
+                                warnings?.warn(
+                                    code = WarningCode.IO_ERROR,
+                                    message = "Failed to read META-INF/services/$service: ${ex.javaClass.simpleName}: ${ex.message}",
+                                    path = jarPath,
+                                    jarEntry = name,
+                                )
+                                emptyList()
+                            }
+
+                        val prev = bestServiceByName[service]
+                        if (prev == null ||
+                            v > prev.first ||
+                            (v == prev.first && providers.joinToString("\n") < prev.second.joinToString("\n"))
+                        ) {
+                            bestServiceByName[service] = v to providers
                         }
                     }
                 }
             }
         } catch (_: Exception) {
             // Unreadable jar: treat as empty. Deterministic & safe.
+            warnings?.warn(
+                code = WarningCode.UNREADABLE_JAR,
+                message = "Unreadable jar (bad zip / I/O error). Treating as empty for scanning/indexing.",
+                path = jarPath,
+                jarEntry = null,
+            )
             return JarScanData(sha256Hex = sha256, classes = emptyList(), services = emptyMap())
         }
 
-        val frozenServices = services.toSortedMap().mapValues { (_, v) -> v.toList().sorted() }
+        val classes =
+            bestClassByLogical.keys
+                .asSequence()
+                .sorted()
+                .map { it.removeSuffix(".class").replace('/', '.') }
+                .distinct()
+                .toList()
+
+        val frozenServices =
+            bestServiceByName
+                .toSortedMap()
+                .mapValues { (_, v) -> v.second }
         return JarScanData(
             sha256Hex = sha256,
-            classes = classes.distinct().sorted(),
+            classes = classes,
             services = frozenServices,
         )
     }

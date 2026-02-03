@@ -21,6 +21,8 @@ package io.enkidu.core.resolve
 import io.enkidu.artifacts.v1.SymbolId
 import io.enkidu.artifacts.v1.SymbolKind
 import io.enkidu.core.model.ClasspathSnapshot
+import io.enkidu.core.util.WarningCode
+import io.enkidu.core.util.WarningCollector
 import org.objectweb.asm.Opcodes
 import java.io.Closeable
 import java.util.concurrent.ConcurrentHashMap
@@ -33,8 +35,11 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class JvmLinkageResolver(
     private val snapshot: ClasspathSnapshot,
+    private val runtimeJavaFeature: Int = Runtime.version().feature(),
+    private val continueOnError: Boolean = false,
+    private val warnings: WarningCollector? = null,
 ) : Closeable {
-    private val loader = ClasspathBytecodeLoader(snapshot)
+    private val loader = ClasspathBytecodeLoader(snapshot, runtimeJavaFeature = runtimeJavaFeature, warnings = warnings)
     private val parsedCache = ConcurrentHashMap<String, ClassResolutionOutcome>()
 
     override fun close() {
@@ -44,8 +49,25 @@ class JvmLinkageResolver(
     fun resolveClass(binaryName: String): ClassResolutionOutcome =
         parsedCache.computeIfAbsent(binaryName) {
             val located = loader.findClass(binaryName) ?: return@computeIfAbsent ClassResolutionOutcome.Missing(binaryName)
-            val parsed = ClassfileParser.parse(located.bytes)
-            ClassResolutionOutcome.Resolved(parsed, located.location)
+            try {
+                val parsed = ClassfileParser.parse(located.bytes)
+                ClassResolutionOutcome.Resolved(parsed, located.location)
+            } catch (e: Exception) {
+                warnings?.warn(
+                    code = WarningCode.INVALID_BYTECODE,
+                    message = "Failed to parse runtime class bytes: ${e.javaClass.simpleName}: ${e.message}",
+                    path = located.location.entryPath,
+                    jarEntry = located.location.jarEntry,
+                )
+                if (!continueOnError) {
+                    throw e
+                }
+                ClassResolutionOutcome.Unparseable(
+                    binaryName = binaryName,
+                    location = located.location,
+                    message = e.message ?: e.javaClass.simpleName,
+                )
+            }
         }
 
     fun resolveMethod(

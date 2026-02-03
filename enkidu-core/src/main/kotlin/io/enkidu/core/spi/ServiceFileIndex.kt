@@ -97,20 +97,27 @@ class ServiceFileIndex(
             return
         }
 
-        JarFile(jarPath.toFile()).use { jar ->
-            val entries =
-                jar
-                    .entries()
-                    .asSequence()
-                    .filter { !it.isDirectory && it.name.startsWith("META-INF/services/") && it.name.length > "META-INF/services/".length }
-                    .sortedBy { it.name }
-                    .toList()
+        try {
+            JarFile(jarPath.toFile()).use { jar ->
+                val entries =
+                    jar
+                        .entries()
+                        .asSequence()
+                        .filter {
+                            !it.isDirectory && it.name.startsWith("META-INF/services/") &&
+                                it.name.length > "META-INF/services/".length
+                        }.sortedBy { it.name }
+                        .toList()
 
-            for (e in entries) {
-                val service = e.name.removePrefix("META-INF/services/")
-                val providers = parseProviders(jar.getInputStream(e))
-                out.getOrPut(service) { mutableListOf() }.add(ServiceFileLocation(entryIndex, jarPath, providers))
+                for (e in entries) {
+                    val service = e.name.removePrefix("META-INF/services/")
+                    val providers = parseProviders(jar.getInputStream(e))
+                    out.getOrPut(service) { mutableListOf() }.add(ServiceFileLocation(entryIndex, jarPath, providers))
+                }
             }
+        } catch (_: Exception) {
+            // Best-effort: unreadable jar -> no SPI entries (engine will surface UNREADABLE_JAR via JarScanRepository when enabled).
+            return
         }
     }
 

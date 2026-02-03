@@ -22,6 +22,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.networknt.schema.JsonSchemaFactory
 import com.networknt.schema.SpecVersion
 import io.enkidu.artifacts.v1.Evidence
+import io.enkidu.artifacts.v1.ExecutionContext
 import io.enkidu.artifacts.v1.FailureType
 import io.enkidu.artifacts.v1.Fingerprint
 import io.enkidu.artifacts.v1.Fingerprints
@@ -31,10 +32,12 @@ import io.enkidu.artifacts.v1.LinkageFailure
 import io.enkidu.artifacts.v1.LinkageReport
 import io.enkidu.artifacts.v1.ReferenceSite
 import io.enkidu.artifacts.v1.ReportSummary
+import io.enkidu.artifacts.v1.ScanWarning
 import io.enkidu.artifacts.v1.Severity
 import io.enkidu.artifacts.v1.SymbolId
 import io.enkidu.artifacts.v1.SymbolKind
 import io.enkidu.artifacts.v1.ToolMetadata
+import io.enkidu.artifacts.v1.WarningCode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -65,6 +68,27 @@ class SarifWriterV1SchemaTest {
         val rules = sarif["runs"][0]["tool"]["driver"]["rules"].map { it["id"].asText() }
         val sorted = rules.sorted()
         assertEquals(sorted, rules, "rules must be sorted for determinism")
+    }
+
+    @Test
+    fun `sarif invocations include toolExecutionNotifications for report warnings`() {
+        val report = sampleReport().canonical()
+        val sarif = readJson(EnkiduReportWriters.sarifV1(report))
+
+        val invocations = sarif["runs"][0]["invocations"]
+        assertTrue(invocations.isArray && invocations.size() == 1, "expected exactly one invocation")
+
+        val notifications = invocations[0]["toolExecutionNotifications"]
+        assertTrue(notifications.isArray, "toolExecutionNotifications must be an array")
+        assertEquals(2, notifications.size(), "should include all report warnings")
+
+        val codes = notifications.map { it["properties"]["code"].asText() }
+        val sorted = codes.sorted()
+        assertEquals(sorted, codes, "warning notifications must be in canonical order")
+
+        val driverProps = sarif["runs"][0]["tool"]["driver"]["properties"]
+        assertEquals(21, driverProps["runtimeJavaFeature"].asInt())
+        assertEquals(true, driverProps["continueOnError"].asBoolean())
     }
 
     private fun sampleReport(): LinkageReport {
@@ -137,6 +161,22 @@ class SarifWriterV1SchemaTest {
             fingerprints = fps,
             summary = ReportSummary(failureCount = failures.size, failureCountByType = mapOf()),
             failures = failures,
+            execution = ExecutionContext(runtimeJavaFeature = 21, continueOnError = true),
+            warnings =
+                listOf(
+                    ScanWarning(
+                        code = WarningCode.INVALID_BYTECODE,
+                        message = "Invalid classfile (ASM parse failed)",
+                        path = "/abs/cp/bad.jar",
+                        jarEntry = "demo/Broken.class",
+                    ),
+                    ScanWarning(
+                        code = WarningCode.MANIFEST_PARSE_FAILED,
+                        message = "Failed to parse manifest; MRJAR flag may be ignored",
+                        path = "/abs/cp/bad.jar",
+                        jarEntry = "META-INF/MANIFEST.MF",
+                    ),
+                ),
         ).canonical()
     }
 
