@@ -121,18 +121,49 @@ class JarScanRepository(
                     }
 
                     // ---- Services (MR-aware, effective view) ----
-                    val parsed = MultiReleaseSupport.parseVersionedName(name)
-                    val logicalCandidate = parsed?.second ?: name
+                    //
+                    // Only index:
+                    //   - base META-INF/services/*
+                    //   - or MR-eligible versioned META-INF/versions/<n>/META-INF/services/*
+                    // Never fall back to treating META-INF/versions/... as a service name.
+                    run {
+                        // Base service descriptor
+                        if (name.startsWith(SERVICES_PREFIX) && name.length > SERVICES_PREFIX.length) {
+                            val service = name.removePrefix(SERVICES_PREFIX)
 
-                    if (logicalCandidate.startsWith(SERVICES_PREFIX) && logicalCandidate.length > SERVICES_PREFIX.length) {
-                        val (ver, logical) =
-                            parsed?.let { (v, l) ->
-                                if (!isMr || runtimeJavaFeature < 9) return@let null
-                                if (v < 9 || v > runtimeJavaFeature) return@let null
-                                v to l
-                            } ?: (0 to name)
+                            val providers =
+                                try {
+                                    parseProviders(zip.getInputStream(e))
+                                } catch (ex: Exception) {
+                                    warnings?.warn(
+                                        code = WarningCode.IO_ERROR,
+                                        message = "Failed to read META-INF/services/$service: ${ex.javaClass.simpleName}: ${ex.message}",
+                                        path = jarPath,
+                                        jarEntry = name,
+                                    )
+                                    emptyList()
+                                }
 
-                        // `logical` is the effective base path (META-INF/services/...)
+                            val prev = bestServiceByName[service]
+                            val ver = 0
+                            if (prev == null ||
+                                ver > prev.first ||
+                                (ver == prev.first && providers.joinToString("\n") < prev.second.joinToString("\n"))
+                            ) {
+                                bestServiceByName[service] = ver to providers
+                            }
+                            return@run
+                        }
+
+                        // Versioned MR service descriptor
+                        val parsed = MultiReleaseSupport.parseVersionedName(name) ?: return@run
+                        val (v, logical) = parsed
+
+                        // Only accept if this is a versioned *service* entry and MR-eligible.
+                        if (!logical.startsWith(SERVICES_PREFIX) || logical.length <= SERVICES_PREFIX.length) return@run
+                        if (!isMr || runtimeJavaFeature < 9) return@run
+                        if (v < 9 || v > runtimeJavaFeature) return@run
+
                         val service = logical.removePrefix(SERVICES_PREFIX)
 
                         val providers =
@@ -150,10 +181,10 @@ class JarScanRepository(
 
                         val prev = bestServiceByName[service]
                         if (prev == null ||
-                            ver > prev.first ||
-                            (ver == prev.first && providers.joinToString("\n") < prev.second.joinToString("\n"))
+                            v > prev.first ||
+                            (v == prev.first && providers.joinToString("\n") < prev.second.joinToString("\n"))
                         ) {
-                            bestServiceByName[service] = ver to providers
+                            bestServiceByName[service] = v to providers
                         }
                     }
                 }
