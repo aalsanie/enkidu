@@ -44,8 +44,15 @@ class HtmlWriterV1SnapshotTest {
     fun `html v1 output is stable`() {
         val report = sampleReport()
 
-        val actual = EnkiduReportWriters.htmlV1(report).toString(StandardCharsets.UTF_8)
-        val expected = loadResource("html/html-writer-v1-snapshot.html")
+        val actual =
+            EnkiduReportWriters
+                .htmlV1(report)
+                .toString(StandardCharsets.UTF_8)
+                .canonicalizeForSnapshot()
+
+        val expected =
+            loadResource("html/html-writer-v1-snapshot.html")
+                .canonicalizeForSnapshot()
 
         assertEquals(expected, actual)
     }
@@ -57,6 +64,22 @@ class HtmlWriterV1SnapshotTest {
                 ?.use { it.readBytes() }
                 ?: error("missing test resource: $path")
         return bytes.toString(StandardCharsets.UTF_8)
+    }
+
+    /**
+     * Snapshot resources can differ across platforms/editors due to:
+     * - UTF-8 BOM (common on Windows)
+     * - CRLF vs LF
+     * - trailing whitespace
+     * - trailing newline at EOF
+     *
+     * We normalize both sides to keep the test strict on content/layout while ignoring IO noise.
+     */
+    private fun String.canonicalizeForSnapshot(): String {
+        val noBom = removePrefix("\uFEFF")
+        val lf = noBom.replace("\r\n", "\n")
+        val noTrailingSpaces = lf.lines().joinToString("\n") { it.trimEnd() }
+        return noTrailingSpaces.trimEnd()
     }
 
     private fun sampleReport(): LinkageReport {
