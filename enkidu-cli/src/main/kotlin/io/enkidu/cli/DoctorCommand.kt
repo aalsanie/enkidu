@@ -25,6 +25,7 @@ import io.enkidu.core.engine.LinkageDoctorEngine
 import io.enkidu.core.engine.LinkageDoctorRequest
 import io.enkidu.core.engine.PerformanceOptions
 import io.enkidu.export.EnkiduReportWriters
+import io.enkidu.export.ReproBundleWriter
 import picocli.CommandLine
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -46,11 +47,16 @@ import java.util.concurrent.Callable
 internal class DoctorCommand : Callable<Int> {
     @CommandLine.Option(
         names = ["--targets"],
-        required = true,
         arity = "1..*",
         description = ["One or more targets to scan: classes directory or jar."],
     )
-    private lateinit var targets: Array<Path>
+    private var targets: Array<Path> = emptyArray()
+
+    @CommandLine.Option(
+        names = ["--targets-file"],
+        description = ["Path to a file containing scan targets (one entry per line)."],
+    )
+    private var targetsFile: Path? = null
 
     @CommandLine.Option(
         names = ["--classpath"],
@@ -114,6 +120,15 @@ internal class DoctorCommand : Callable<Int> {
     private var jarScanCacheDir: Path? = null
 
     @CommandLine.Option(
+        names = ["--bundle"],
+        description = [
+            "Optional repro/support bundle output path.",
+            "If the path ends with .zip, a zip bundle is created; otherwise a directory bundle is created.",
+        ],
+    )
+    private var bundleOutput: Path? = null
+
+    @CommandLine.Option(
         names = ["--jar-scan-parallelism"],
         defaultValue = "1",
         description = ["Parallelism for runtime classpath jar scanning (>= 1)."],
@@ -142,6 +157,7 @@ internal class DoctorCommand : Callable<Int> {
 
     override fun call(): Int =
         try {
+            val resolvedTargets = resolveTargets(targets.toList(), targetsFile)
             val resolvedClasspath = resolveClasspathEntries(classpathEntries.toList(), classpathFile)
             val engine = LinkageDoctorEngine()
 
@@ -154,7 +170,7 @@ internal class DoctorCommand : Callable<Int> {
                                 version = BuildInfo.version,
                                 resolverMode = RESOLVER_MODE,
                             ),
-                        targets = targets.toList(),
+                        targets = resolvedTargets,
                         runtimeClasspath = resolvedClasspath,
                         runtimeJavaFeature = runtimeJavaFeature.takeIf { it > 0 },
                         continueOnError = continueOnError,
@@ -167,6 +183,15 @@ internal class DoctorCommand : Callable<Int> {
                             ),
                     ),
                 )
+
+            bundleOutput?.let { out ->
+                ReproBundleWriter.writeDoctorBundle(
+                    report = report,
+                    targets = resolvedTargets,
+                    runtimeClasspath = resolvedClasspath,
+                    bundleOutput = out,
+                )
+            }
 
             val bytes =
                 when (format) {
@@ -239,6 +264,33 @@ internal class DoctorCommand : Callable<Int> {
 
         require(combined.isNotEmpty()) {
             "runtime classpath must be provided via --classpath and or --classpath-file"
+        }
+
+        return combined
+    }
+
+    private fun resolveTargets(
+        direct: List<Path>,
+        manifestFile: Path?,
+    ): List<Path> {
+        val fileEntries =
+            if (manifestFile == null) {
+                emptyList()
+            } else {
+                require(Files.isRegularFile(manifestFile)) { "targets file does not exist: $manifestFile" }
+                Files
+                    .readAllLines(manifestFile, StandardCharsets.UTF_8)
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && !it.startsWith("#") }
+                    .map { Path.of(it) }
+            }
+
+        val combined = mutableListOf<Path>()
+        combined.addAll(fileEntries)
+        combined.addAll(direct)
+
+        require(combined.isNotEmpty()) {
+            "targets must be provided via --targets and or --targets-file"
         }
 
         return combined
