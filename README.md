@@ -20,10 +20,53 @@ It scans your compiled bytecode and resolves every referenced class/method/field
 ## What it detects
 
 - **Missing symbols**: missing classes/methods/fields (`NoClassDefFoundError`, `NoSuchMethodError`, `NoSuchFieldError`)
-- **Binary incompatibility / descriptor mismatch**: type shape doesn’t match (`IncompatibleClassChangeError`, signature mismatches)
+- **Binary incompatibility / descriptor mismatch**: type shape doesn’t match (`IncompatibleClassChangeError`, descriptor mismatches)
 - **Access/visibility issues**: runtime access problems (including module/visibility constraints when available)
 - **Classpath shadowing / duplicates**: same FQCN in multiple jars → winner vs shadowed, and whether the winner breaks call sites
 - **ServiceLoader / SPI problems**: missing providers, wrong provider types, overwritten providers
+
+---
+
+## Quick start (CLI)
+
+You need two things:
+
+1) **Targets** (compiled classes dir or jar)  
+2) **Runtime classpath manifest** (ordered entries, one per line)
+
+Create `classpath.txt`:
+
+```txt
+# one entry per line, in resolution order
+/path/to/runtime/dep-1.jar
+/path/to/runtime/dep-2.jar
+/path/to/runtime/classes-dir
+```
+
+Run:
+
+```bash
+./gradlew :enkidu-cli:run --args="doctor \
+  --targets build/classes/java/main \
+  --classpath-file classpath.txt \
+  --format json \
+  --fail-on any"
+```
+
+More:
+- Full CLI reference (flags, exit codes, examples): **[docs/cli.md](./docs/cli.md)**
+- How to read and fix failures: **[docs/understanding-failures.md](./docs/understanding-failures.md)**
+- Step-by-step quick start: **[QUICK_START.md](./QUICK_START.md)**
+
+---
+
+## IntelliJ plugin
+
+Same model as the CLI, but interactive:
+
+- run linkage scan for the current module output + chosen classpath
+- inspect failures grouped by root cause
+- navigate to source lines when available and see the resolved jar chain
 
 ---
 
@@ -35,15 +78,6 @@ Compilation doesn’t guarantee runtime linkage:
 - failures surface late and waste time (dependency pinball + unreadable stacktraces)
 
 Enkidu makes the classpath explicit and checks linkage deterministically.
-
----
-
-## How to use it
-
-- **CLI**: run Enkidu against a target (classes dir or jar) and a runtime classpath manifest.
-- **IntelliJ plugin**: same idea, but faster feedback inside the IDE (run → inspect failures → navigate/copy evidence).
-
-Quick start: see **[QUICK_START.md](./QUICK_START.md)**
 
 ---
 
