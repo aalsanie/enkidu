@@ -35,3 +35,21 @@ subprojects {
     }
   }
 }
+
+
+tasks.register("printVersion") {
+  group = "enkidu"
+  description = "Prints the current project version (used by release workflow)."
+  doLast { println(project.version.toString()) }
+}
+
+tasks.register("ci") {
+  group = "verification"
+  description = "Runs the full CI gate: tests + plugin verification."
+  dependsOn(
+    "check",
+    ":enkidu-artifacts:validateArtifactsVersioning",
+    ":enkidu-intellij-plugin:verifyPluginProjectConfiguration",
+    ":enkidu-intellij-plugin:verifyPlugin",
+  )
+}

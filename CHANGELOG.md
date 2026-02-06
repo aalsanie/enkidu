@@ -16,6 +16,7 @@
 - Added MRJAR-aware class/service/module-info selection (effective view) with runtimeJavaFeature override.
 - Added continueOnError best-effort mode + deterministic warnings (with provenance) and report execution context.
 - Improved resilience on unreadable jars/manifests/invalid bytecode; added tests and exporter updates to surface warnings.
+- Added CI pipeline and tag-based release workflow producing plugin + CLI artifacts with checksums
 
 ### Fixed
 - JarIndex winner selection now strictly follows classpath order across directories and jars
