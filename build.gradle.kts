@@ -1,4 +1,5 @@
 plugins {
+  base
   kotlin("jvm") version "2.0.21" apply false
   id("com.diffplug.spotless") version "8.1.0" apply false
 }
