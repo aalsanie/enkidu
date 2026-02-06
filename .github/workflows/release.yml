@@ -17,6 +17,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Sanity check repository checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          pwd
+          ls -la
+          test -f ./gradlew || { echo "::error::Missing ./gradlew in repo root (must be committed)"; exit 1; }
+          chmod +x ./gradlew
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -32,9 +41,9 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          VERSION="$(./gradlew -q printVersion)"
+          VERSION="$(./gradlew --no-daemon -q printVersion)"
           if [[ "${TAG}" != "v${VERSION}" ]]; then
-            echo "Tag (${TAG}) must match version in Gradle (${VERSION})."
+            echo "::error::Tag (${TAG}) must match version in Gradle (${VERSION})."
             exit 1
           fi
 
@@ -47,15 +56,11 @@ jobs:
       - name: Build CLI distribution
         run: ./gradlew --no-daemon :enkidu-cli:installDist
 
-      - name: Collect artifacts
+      - name: Collect artifacts (fail-fast)
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
-          cp -v enkidu-intellij-plugin/build/distributions/*.zip dist/ || true
-          tar -C enkidu-cli/build/install -czf dist/enkidu-cli-${GITHUB_REF_NAME}.tar.gz enkidu-cli || true
-          (cd dist && sha256sum * > SHA256SUMS.txt) || true
-          ls -la dist
+          bash .github/scripts/collect_release_artifacts.sh
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

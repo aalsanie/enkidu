@@ -3,21 +3,29 @@ name: CI
 on:
   pull_request:
   push:
-    branches: ["main"]
-    tags-ignore: ["v*"]
+    branches:
+      - main
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 jobs:
-  build-test-verify:
-    name: Build + Test + Plugin Verification
+  build:
+    name: Tests + determinism + plugin verification
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Sanity check repository checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          pwd
+          ls -la
+          test -f ./gradlew || { echo "::error::Missing ./gradlew in repo root (must be committed)"; exit 1; }
+          chmod +x ./gradlew
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -29,5 +37,5 @@ jobs:
       - name: Gradle wrapper validation
         uses: gradle/wrapper-validation-action@v2
 
-      - name: Build, unit tests, integration tests, determinism gates, plugin verification
+      - name: Run CI task
         run: ./gradlew --no-daemon ci
