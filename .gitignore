@@ -30,5 +30,7 @@ replay_pid*
 
 .dev
 
-# --- Gradle wrapper must be committed ---
+# IntelliJ Platform Gradle Plugin cache
+.intellijPlatform/
+
 !gradle/wrapper/gradle-wrapper.jar

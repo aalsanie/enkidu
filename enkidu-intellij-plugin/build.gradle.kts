@@ -3,7 +3,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     kotlin("jvm")
-    id("org.jetbrains.intellij.platform") version "2.10.5"
+    id("org.jetbrains.intellij.platform") version "2.11.0"
 }
 
 kotlin {
@@ -50,6 +50,15 @@ intellijPlatform {
         name = "Enkidu Linkage Doctor"
         version = project.version.toString()
     }
+
+
+pluginVerification {
+    ides {
+        // Verify against JetBrains' recommended IDE set for this plugin configuration.
+        // This satisfies the Plugin Verifier requirement and keeps CI stable across platform versions.
+        recommended()
+    }
+}
 }
 
 tasks {
