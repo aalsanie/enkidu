@@ -42,3 +42,5 @@ jobs:
           path: |
             **/build/reports/tests/
             **/build/test-results/
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
