@@ -1,3 +1,10 @@
+import com.diffplug.gradle.spotless.SpotlessExtension
+import org.gradle.api.plugins.JavaPlugin
+import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
+
 plugins {
   kotlin("jvm") version "2.0.21" apply false
   id("com.diffplug.spotless") version "8.1.0" apply false
@@ -14,7 +21,7 @@ allprojects {
 
 subprojects {
   plugins.withId("org.jetbrains.kotlin.jvm") {
-    the<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>().jvmToolchain(21)
+    the<KotlinJvmProjectExtension>().jvmToolchain(21)
   }
 
   plugins.withType<JavaPlugin> {
@@ -25,7 +32,7 @@ subprojects {
 
   apply(plugin = "com.diffplug.spotless")
 
-  extensions.configure<com.diffplug.gradle.spotless.SpotlessExtension> {
+  extensions.configure<SpotlessExtension> {
     kotlin {
       ktlint()
       licenseHeaderFile(rootProject.file("spotless/HEADER.kt"), "package ")
@@ -34,19 +41,16 @@ subprojects {
       ktlint()
     }
   }
-}
 
-// ------------------------------------------------------------
-// CI + release
-// ------------------------------------------------------------
-
-subprojects {
   tasks.withType<AbstractArchiveTask>().configureEach {
     isPreserveFileTimestamps = false
     isReproducibleFileOrder = true
   }
 }
 
+// ------------------------------------------------------------
+// CI + release (root)
+// ------------------------------------------------------------
 
 tasks.register("verifyNoWorkingTreeChanges") {
   group = "verification"
@@ -56,23 +60,27 @@ tasks.register("verifyNoWorkingTreeChanges") {
     val out = java.io.ByteArrayOutputStream()
     val err = java.io.ByteArrayOutputStream()
 
-    val result = exec {
-      isIgnoreExitValue = true
+    // ProviderFactory.exec is the non-deprecated API in Gradle 8+
+    val execProvider = providers.exec {
+      // Use explicit setter calls to avoid Kotlin-script accessor/overload issues.
+      setIgnoreExitValue(true)
       commandLine("git", "status", "--porcelain")
-      standardOutput = out
-      errorOutput = err
-    }.exitValue
+      setStandardOutput(out)
+      setErrorOutput(err)
+    }
 
-    if (result != 0) {
-      error("git status failed (exit=$result):\n" + err.toString(Charsets.UTF_8))
+    val result = execProvider.result.get()
+
+    if (result.exitValue != 0) {
+      error("git status failed (exit=${result.exitValue}):\n${err.toString(Charsets.UTF_8)}")
     }
 
     val status = out.toString(Charsets.UTF_8).trim()
     if (status.isNotEmpty()) {
       error(
         "Working tree is dirty after build/test. This usually means a non-deterministic generator rewrote tracked files.\n" +
-          "Please commit the generated changes (if intentional) or make the generation deterministic.\n\n" +
-          "git status --porcelain:\n$status"
+                "Please commit the generated changes (if intentional) or make the generation deterministic.\n\n" +
+                "git status --porcelain:\n$status"
       )
     }
   }
@@ -80,7 +88,7 @@ tasks.register("verifyNoWorkingTreeChanges") {
 
 tasks.register("verifyReleaseTag") {
   group = "verification"
-  description = "On GitHub Actions tag builds, ensures tag name matches project.version."
+  description = "On GitHub Actions tag builds, ensures tag name matches project.version and forbids SNAPSHOT."
 
   doLast {
     val refType = System.getenv("GITHUB_REF_TYPE")?.trim()?.lowercase()
@@ -93,13 +101,12 @@ tasks.register("verifyReleaseTag") {
       if (tag != expected) {
         error(
           "Release tag/version mismatch.\n" +
-            "Tag:      $tag\n" +
-            "Expected: $expected\n\n" +
-            "Fix: bump project.version in build.gradle.kts or retag with the correct version."
+                  "Tag:      $tag\n" +
+                  "Expected: $expected\n\n" +
+                  "Fix: bump project.version in build.gradle.kts or retag with the correct version."
         )
       }
 
-      // Disallow SNAPSHOT on tags.
       if (project.version.toString().contains("SNAPSHOT", ignoreCase = true)) {
         error("Release tags must not build SNAPSHOT versions. Current version: ${project.version}")
       }
@@ -107,26 +114,31 @@ tasks.register("verifyReleaseTag") {
   }
 }
 
-
+// Aggregate spotless across all subprojects (root has no Spotless tasks).
 tasks.register("spotlessCheckAll") {
   group = "verification"
   description = "Runs Spotless checks for all subprojects."
-
-  gradle.projectsEvaluated {
-
-    val targets = subprojects.mapNotNull { it.tasks.findByName("spotlessCheck")?.path }
-    if (targets.isEmpty()) error("No spotlessCheck tasks found in subprojects.")
-    dependsOn(targets)
-  }
 }
 
+// Aggregate unit + integration checks across all subprojects (root has no check task).
 tasks.register("checkAll") {
   group = "verification"
   description = "Runs unit + integration tests for all subprojects."
+}
 
-  gradle.projectsEvaluated {
+/**
+ * Gradle 8.13+ correctness:
+ * Do NOT call gradle.projectsEvaluated { ... } from inside task configuration blocks.
+ */
+gradle.projectsEvaluated {
+  tasks.named("spotlessCheckAll").configure {
+    val targets = subprojects.mapNotNull { sp -> sp.tasks.findByName("spotlessCheck")?.path }
+    if (targets.isEmpty()) error("No spotlessCheck tasks found in subprojects.")
+    dependsOn(targets)
+  }
 
-    val targets = subprojects.mapNotNull { it.tasks.findByName("check")?.path }
+  tasks.named("checkAll").configure {
+    val targets = subprojects.mapNotNull { sp -> sp.tasks.findByName("check")?.path }
     if (targets.isEmpty()) error("No check tasks found in subprojects.")
     dependsOn(targets)
   }
@@ -144,4 +156,3 @@ tasks.register("ci") {
     ":verifyNoWorkingTreeChanges",
   )
 }
-
