@@ -57,25 +57,23 @@ tasks.register("verifyNoWorkingTreeChanges") {
   description = "Fails if the build modified tracked files (determinism guard)."
 
   doLast {
-    val out = java.io.ByteArrayOutputStream()
-    val err = java.io.ByteArrayOutputStream()
+    fun runGitStatusPorcelain(): Pair<Int, String> {
+      val pb = ProcessBuilder(listOf("git", "status", "--porcelain"))
+        .directory(rootDir)
+        .redirectErrorStream(true)
 
-    // ProviderFactory.exec is the non-deprecated API in Gradle 8+
-    val execProvider = providers.exec {
-      // Use explicit setter calls to avoid Kotlin-script accessor/overload issues.
-      setIgnoreExitValue(true)
-      commandLine("git", "status", "--porcelain")
-      setStandardOutput(out)
-      setErrorOutput(err)
+      val p = pb.start()
+      val out = p.inputStream.bufferedReader(Charsets.UTF_8).readText()
+      val code = p.waitFor()
+      return code to out
     }
 
-    val result = execProvider.result.get()
-
-    if (result.exitValue != 0) {
-      error("git status failed (exit=${result.exitValue}):\n${err.toString(Charsets.UTF_8)}")
+    val (code, output) = runGitStatusPorcelain()
+    if (code != 0) {
+      error("git status failed (exit=$code):\n$output")
     }
 
-    val status = out.toString(Charsets.UTF_8).trim()
+    val status = output.trim()
     if (status.isNotEmpty()) {
       error(
         "Working tree is dirty after build/test. This usually means a non-deterministic generator rewrote tracked files.\n" +
