@@ -50,6 +50,11 @@ intellijPlatform {
         name = "Enkidu Linkage Doctor"
         version = project.version.toString()
     }
+    pluginVerification {
+        ides {
+            recommended()
+        }
+    }
 }
 
 tasks {
