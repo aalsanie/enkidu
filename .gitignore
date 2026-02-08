@@ -29,3 +29,9 @@ replay_pid*
 .idea
 
 .dev
+
+.intellijPlatform
+
+enkidu-cli/SHA256SUMS.txt
+
+.gradle
