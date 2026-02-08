@@ -61,3 +61,24 @@ tasks {
         useJUnitPlatform()
     }
 }
+
+// ------------------------------------------------------------
+// CI gate: IntelliJ plugin verification
+// ------------------------------------------------------------
+tasks.register("pluginVerification") {
+    group = "verification"
+    description = "Runs IntelliJ plugin verification tasks (structure + plugin verifier)."
+
+    // Always build the plugin ZIP first.
+    val buildPluginTask = tasks.findByName("buildPlugin")
+    if (buildPluginTask != null) {
+        dependsOn(buildPluginTask)
+    }
+
+    listOf("verifyPlugin", "runPluginVerifier", "verifyPluginStructure").forEach { name ->
+        val t = tasks.findByName(name)
+        if (t != null) {
+            dependsOn(t)
+        }
+    }
+}
