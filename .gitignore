@@ -35,3 +35,7 @@ replay_pid*
 enkidu-cli/SHA256SUMS.txt
 
 .gradle
+
+**/build/
+.gradle/
+**/.gradle/
