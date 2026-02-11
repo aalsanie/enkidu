@@ -1,0 +1,94 @@
+{
+  "failures": [
+    {
+      "evidence": {
+        "shadowedJars": [
+          "dupe-1.0.jar",
+          "dupe-1.5.jar"
+        ],
+        "winnerJar": "dupe-2.0.jar"
+      },
+      "fixPlan": [
+        {
+          "confidence": 0.9,
+          "kind": "REMOVE_DUPLICATES",
+          "value": "Remove older dupe jars from runtime"
+        }
+      ],
+      "message": "Duplicate class found; runtime winner may be ABI-incompatible.",
+      "referenceSite": {
+        "bytecodeOffset": 3,
+        "callerClass": "com/example/App",
+        "callerDescriptor": "()V",
+        "callerMethod": "init",
+        "line": 7
+      },
+      "severity": "WARN",
+      "symbol": {
+        "descriptor": "Lcom/example/Dupe;",
+        "kind": "TYPE",
+        "name": "com/example/Dupe",
+        "owner": "com/example/Dupe"
+      },
+      "type": "DUPLICATE_CLASS_SHADOWING"
+    },
+    {
+      "evidence": {
+        "shadowedJars": [
+          "lib-0.9.jar"
+        ],
+        "winnerJar": "lib-1.0.jar"
+      },
+      "fixPlan": [
+        {
+          "confidence": 0.8,
+          "kind": "ALIGN_VERSIONS",
+          "value": "Align lib to 1.0 across modules"
+        },
+        {
+          "confidence": 0.7,
+          "kind": "EXCLUDE_JAR",
+          "value": "Exclude lib-0.9.jar from runtimeClasspath"
+        }
+      ],
+      "message": "Referenced method not found on resolved runtime type.",
+      "referenceSite": {
+        "bytecodeOffset": 34,
+        "callerClass": "com/example/App",
+        "callerDescriptor": "([Ljava/lang/String;)V",
+        "callerMethod": "main",
+        "line": 12
+      },
+      "severity": "ERROR",
+      "symbol": {
+        "descriptor": "(Ljava/lang/String;)V",
+        "kind": "METHOD",
+        "name": "doThing",
+        "owner": "com/example/Lib"
+      },
+      "type": "MISSING_METHOD"
+    }
+  ],
+  "fingerprints": {
+    "classpath": {
+      "algorithm": "SHA-256",
+      "value": "23a01d813e83299b511f330b7de645113c7328a5ad758363bfe88d1839e948e0"
+    },
+    "targets": {
+      "algorithm": "SHA-256",
+      "value": "19448f113494a4fb9c8628f915d5975358d5f78a8d0f1549e77d6cc1da3e4a91"
+    }
+  },
+  "summary": {
+    "failureCount": 2,
+    "failureCountByType": {
+      "DUPLICATE_CLASS_SHADOWING": 1,
+      "MISSING_METHOD": 1
+    }
+  },
+  "tool": {
+    "name": "enkidu-linkage-doctor",
+    "resolverMode": "jvm-linkage-sim-v1",
+    "version": "0.1.0-SNAPSHOT"
+  }
+}

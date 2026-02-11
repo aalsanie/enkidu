@@ -1,0 +1,32 @@
+{
+  "compared": {
+    "classpathA": {
+      "entryCount": 10,
+      "fingerprintSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "label": "A"
+    },
+    "classpathB": {
+      "entryCount": 11,
+      "fingerprintSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "label": "B"
+    },
+    "targets": [
+      "/path/to/target.jar"
+    ]
+  },
+  "fixed": [],
+  "regressions": [],
+  "summary": {
+    "fixed": 0,
+    "regressions": 0,
+    "totalFailuresA": 0,
+    "totalFailuresB": 0,
+    "winnerChanges": 0
+  },
+  "tool": {
+    "name": "enkidu",
+    "resolverMode": "jvm-linkage-sim-v1",
+    "version": "1.0.0"
+  },
+  "winnerChanges": []
+}
