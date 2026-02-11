@@ -19,6 +19,7 @@
 
 ### Fixed
 - JarIndex winner selection now strictly follows classpath order across directories and jars
+- JSON deserialization for artifacts v1 is now forward-compatible by ignoring unknown fields.
 
 ## [0.2.0]
 ### Added
