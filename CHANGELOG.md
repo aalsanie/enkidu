@@ -3,6 +3,7 @@
 
 ## [unreleased]
 
+## [0.3.0]
 ### Added
 - ServiceLoader/SPI validation: detects broken `META-INF/services/*` entries (missing provider/service, type mismatch, non-instantiable providers) and flags packaging overwrite/merge risks.
 - Duplicate-class impact analysis: compares winner vs shadowed copies via bytecode hash + public ABI shape, scores shadowing risk, and highlights dangerous duplicates vs benign identical copies.

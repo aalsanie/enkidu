@@ -26,13 +26,17 @@ import kotlin.test.assertEquals
 class ArtifactsV1SchemaFreezeTest {
     @Test
     fun `artifacts v1 schema is frozen`() {
-        val actual = ArtifactsV1SchemaSignature.generate()
+        val actual = normalizeNewlines(ArtifactsV1SchemaSignature.generate()).trimEnd()
         val expected =
-            javaClass.getResource("/schema/artifacts-v1.schema.sig")?.readText()
-                ?: error("Missing schema snapshot resource: /schema/artifacts-v1.schema.sig")
+            normalizeNewlines(
+                javaClass.getResource("/schema/artifacts-v1.schema.sig")?.readText()
+                    ?: error("Missing schema snapshot resource: /schema/artifacts-v1.schema.sig"),
+            ).trimEnd()
 
-        assertEquals(expected.trimEnd(), actual.trimEnd())
+        assertEquals(expected, actual)
     }
+
+    private fun normalizeNewlines(s: String): String = s.replace("\r\n", "\n").replace("\r", "\n")
 
     private object ArtifactsV1SchemaSignature {
         private val V1_SOURCES: List<java.nio.file.Path> =
