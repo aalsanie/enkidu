@@ -9,7 +9,7 @@ kotlin {
 dependencies {
     implementation(project(":enkidu-artifacts"))
 
-    implementation("org.ow2.asm:asm:9.7.1")
+    implementation("org.ow2.asm:asm:9.10.1")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
