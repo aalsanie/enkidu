@@ -30,7 +30,7 @@ dependencies {
     implementation(project(":enkidu-export"))
 
     testImplementation(kotlin("test"))
-    testImplementation(platform("org.junit:junit-bom:5.11.0"))
+    testImplementation(platform("org.junit:junit-bom:6.1.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
     testImplementation("junit:junit:4.13.2")
