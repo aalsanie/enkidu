@@ -6,7 +6,7 @@ import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 plugins {
-  kotlin("jvm") version "2.0.21" apply false
+  kotlin("jvm") version "2.4.10" apply false
   id("com.diffplug.spotless") version "8.1.0" apply false
 }
 
