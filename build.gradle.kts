@@ -7,7 +7,7 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 plugins {
   kotlin("jvm") version "2.4.10" apply false
-  id("com.diffplug.spotless") version "8.1.0" apply false
+  id("com.diffplug.spotless") version "8.8.0" apply false
 }
 
 allprojects {
