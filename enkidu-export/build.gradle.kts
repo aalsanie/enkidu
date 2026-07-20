@@ -11,7 +11,7 @@ dependencies {
     implementation(project(":enkidu-artifacts"))
     testImplementation("com.networknt:json-schema-validator:1.5.6")
     testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.2")
 }
 
 tasks.test {

@@ -15,7 +15,7 @@ dependencies {
     implementation("info.picocli:picocli:4.7.6")
 
     testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.2")
 }
 
 application {

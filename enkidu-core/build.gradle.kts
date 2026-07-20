@@ -12,7 +12,7 @@ dependencies {
     implementation("org.ow2.asm:asm:9.10.1")
 
     testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.2")
 }
 
 tasks.test {

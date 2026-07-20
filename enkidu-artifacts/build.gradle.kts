@@ -12,7 +12,7 @@ dependencies {
     api("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
 
     testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.0")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.2")
 }
 
 tasks.test {
