@@ -1,5 +1,5 @@
-import java.util.jar.JarFile
 import org.gradle.api.tasks.bundling.Jar
+import java.util.jar.JarFile
 
 plugins {
     kotlin("jvm")
@@ -46,7 +46,13 @@ val verifyCliJarMetadata =
         dependsOn(tasks.named("jar"))
 
         doLast {
-            val cliJar = tasks.named<Jar>("jar").get().archiveFile.get().asFile
+            val cliJar =
+                tasks
+                    .named<Jar>("jar")
+                    .get()
+                    .archiveFile
+                    .get()
+                    .asFile
 
             JarFile(cliJar).use { jar ->
                 val attributes = jar.manifest?.mainAttributes ?: error("CLI JAR is missing META-INF/MANIFEST.MF")
