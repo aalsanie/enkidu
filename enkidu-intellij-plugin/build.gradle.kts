@@ -40,7 +40,7 @@ dependencies {
         create("IC", "2024.2.5")
         testFramework(TestFrameworkType.Platform)
 
-        // com.intellij.java is bundled with IntelliJ. Using bundledPlugin avoids the "version required" error.
+        // com.intellij.java is bundled with IntelliJ.
         bundledPlugin("com.intellij.java")
     }
 }
@@ -67,23 +67,15 @@ tasks {
     }
 }
 
-// ------------------------------------------------------------
-// CI gate: IntelliJ plugin verification
-// ------------------------------------------------------------
+// Stable CI aggregate over the task names provided by IntelliJ Platform Gradle Plugin 2.10.5.
+// tasks.named(...) intentionally fails configuration if an expected verification task disappears.
 tasks.register("pluginVerification") {
     group = "verification"
-    description = "Runs IntelliJ plugin verification tasks (structure + plugin verifier)."
+    description = "Builds the plugin and verifies its structure and IDE compatibility."
 
-    // Always build the plugin ZIP first.
-    val buildPluginTask = tasks.findByName("buildPlugin")
-    if (buildPluginTask != null) {
-        dependsOn(buildPluginTask)
-    }
-
-    listOf("verifyPlugin", "runPluginVerifier", "verifyPluginStructure").forEach { name ->
-        val t = tasks.findByName(name)
-        if (t != null) {
-            dependsOn(t)
-        }
-    }
+    dependsOn(
+        tasks.named("buildPlugin"),
+        tasks.named("verifyPlugin"),
+        tasks.named("verifyPluginStructure"),
+    )
 }

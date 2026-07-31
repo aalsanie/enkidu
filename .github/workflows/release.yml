@@ -7,53 +7,118 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
+    name: Verify and publish release
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Validate Gradle Wrapper
-        uses: gradle/actions/wrapper-validation@v6
+      - name: Install Java 17 toolchain
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          set-default: false
+          verify-signature: true
 
-      - name: Setup Java 21
-        uses: actions/setup-java@v5
+      - name: Install Java 21
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
+          verify-signature: true
 
-      - name: Verify tag discipline
-        run: ./gradlew --no-daemon verifyReleaseTag
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
+        with:
+          cache-provider: basic
+          cache-read-only: true
 
-      - name: Build + verify
-        run: ./gradlew --no-daemon ci
+      - name: Make scripts executable
+        run: chmod +x gradlew .github/scripts/*.sh
 
-      - name: Assemble release artifacts
+      - name: Verify immutable action pins
+        run: python3 .github/scripts/verify-action-pins.py
+
+      - name: Verify tag is on main
         run: |
-          ./gradlew --no-daemon :enkidu-intellij-plugin:buildPlugin
-          ls -la enkidu-intellij-plugin/build/distributions || true
-          ls -la **/build/libs || true
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-artifacts
-          path: |
-            enkidu-intellij-plugin/build/distributions/*.zip
-            **/build/libs/*.jar
-            **/build/publications/**/*
-          if-no-files-found: warn
+      - name: Verify tag and changelog discipline
+        run: ./gradlew --no-daemon --stacktrace verifyReleaseTag
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+      - name: Run all production gates
+        run: ./gradlew --no-daemon --stacktrace ci
+
+      - name: Run controlled linkage scenarios
+        run: .github/scripts/verify-pit-project.sh
+
+      - name: Build release artifacts twice and compare checksums
+        env:
+          PASS_ONE: ${{ runner.temp }}/enkidu-release-pass-1
+          PASS_TWO: ${{ runner.temp }}/enkidu-release-pass-2
+        run: |
+          set -euo pipefail
+
+          version="$(./gradlew --no-daemon --quiet printVersion | tail -n 1 | tr -d '\r')"
+          test -n "$version"
+
+          build_release() {
+            ./gradlew               --no-daemon               --stacktrace               clean               :enkidu-artifacts:jar               :enkidu-core:jar               :enkidu-export:jar               :enkidu-cli:jar               :enkidu-cli:distZip               :enkidu-cli:distTar               :enkidu-intellij-plugin:buildPlugin
+          }
+
+          rm -rf "$PASS_ONE" "$PASS_TWO" build/release
+
+          build_release
+          .github/scripts/stage-release-artifacts.sh "$PASS_ONE" "$version"
+
+          build_release
+          .github/scripts/stage-release-artifacts.sh "$PASS_TWO" "$version"
+
+          diff -u "$PASS_ONE/SHA256SUMS.txt" "$PASS_TWO/SHA256SUMS.txt"
+
+          mkdir -p build/release
+          cp -a "$PASS_TWO/." build/release/
+
+      - name: Verify release build did not modify tracked files
+        run: ./gradlew --no-daemon --stacktrace verifyNoWorkingTreeChanges
+
+      - name: Generate signed build provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
         with:
-          generate_release_notes: true
-          files: |
-            enkidu-intellij-plugin/build/distributions/*.zip
-            **/build/libs/*.jar
-      - name: Make Gradle wrapper executable
-        run: chmod +x gradlew
+          subject-path: build/release/*
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-artifacts-${{ github.ref_name }}
+          path: build/release/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          version="$(./gradlew --no-daemon --quiet printVersion | tail -n 1 | tr -d '\r')"
+
+          gh release create "$GITHUB_REF_NAME"             build/release/*             --verify-tag             --generate-notes             --title "Enkidu $version"
