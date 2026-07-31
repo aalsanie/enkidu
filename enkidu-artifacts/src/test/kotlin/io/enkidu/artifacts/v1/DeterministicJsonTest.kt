@@ -19,6 +19,7 @@
 package io.enkidu.artifacts.v1
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
 import java.util.Random
@@ -32,10 +33,14 @@ class DeterministicJsonTest {
         val json1 = EnkiduJson.prettyWriter.writeValueAsString(report1)
         val json2 = EnkiduJson.prettyWriter.writeValueAsString(report2)
 
+        // Enkidu output is platform-independent and always uses LF line endings.
+        assertFalse(json1.contains('\r'), "Enkidu JSON output must use LF line endings.")
+
         // Byte-for-byte identical after canonicalization.
         assertEquals(json1, json2)
 
-        // Golden file contract.
+        // Golden file contract. Normalize the checked-out fixture because Git may
+        // transform text-resource line endings on Windows.
         val golden = readResource("/golden/linkage-report-v1.json")
         assertEquals(golden, json1)
     }
@@ -138,6 +143,12 @@ class DeterministicJsonTest {
 
     private fun readResource(path: String): String {
         val stream = requireNotNull(javaClass.getResourceAsStream(path)) { "Missing resource: $path" }
-        return stream.readBytes().toString(StandardCharsets.UTF_8).trimEnd() // stable compare
+        val text = stream.readBytes().toString(StandardCharsets.UTF_8)
+        return normalizeLineEndings(text).trimEnd()
     }
+
+    private fun normalizeLineEndings(value: String): String =
+        value
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
 }
