@@ -1,9 +1,5 @@
 import com.diffplug.gradle.spotless.SpotlessExtension
-import org.gradle.api.plugins.JavaPlugin
-import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
-import org.gradle.jvm.toolchain.JavaLanguageVersion
-import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
 plugins {
   kotlin("jvm") version "2.4.10" apply false
@@ -20,16 +16,6 @@ allprojects {
 }
 
 subprojects {
-  plugins.withId("org.jetbrains.kotlin.jvm") {
-    the<KotlinJvmProjectExtension>().jvmToolchain(21)
-  }
-
-  plugins.withType<JavaPlugin> {
-    the<JavaPluginExtension>().toolchain {
-      languageVersion.set(JavaLanguageVersion.of(21))
-    }
-  }
-
   apply(plugin = "com.diffplug.spotless")
 
   extensions.configure<SpotlessExtension> {
@@ -52,33 +38,45 @@ subprojects {
 // CI + release (root)
 // ------------------------------------------------------------
 
+tasks.register("printVersion") {
+  group = "help"
+  description = "Prints the exact project version."
+  doLast {
+    println(project.version)
+  }
+}
+
 tasks.register("verifyNoWorkingTreeChanges") {
   group = "verification"
-  description = "Fails if the build modified tracked files (determinism guard)."
+  description = "Fails if a build or generator modified tracked or untracked repository files."
 
   doLast {
-    fun runGitStatusPorcelain(): Pair<Int, String> {
-      val pb = ProcessBuilder(listOf("git", "status", "--porcelain"))
+    val process =
+      ProcessBuilder(
+        listOf(
+          "git",
+          "status",
+          "--porcelain=v1",
+          "--untracked-files=all",
+        ),
+      )
         .directory(rootDir)
         .redirectErrorStream(true)
+        .start()
 
-      val p = pb.start()
-      val out = p.inputStream.bufferedReader(Charsets.UTF_8).readText()
-      val code = p.waitFor()
-      return code to out
-    }
+    val output = process.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+    val exitCode = process.waitFor()
 
-    val (code, output) = runGitStatusPorcelain()
-    if (code != 0) {
-      error("git status failed (exit=$code):\n$output")
+    if (exitCode != 0) {
+      error("git status failed (exit=$exitCode):\n$output")
     }
 
     val status = output.trim()
     if (status.isNotEmpty()) {
       error(
-        "Working tree is dirty after build/test. This usually means a non-deterministic generator rewrote tracked files.\n" +
-                "Please commit the generated changes (if intentional) or make the generation deterministic.\n\n" +
-                "git status --porcelain:\n$status"
+        "Working tree is dirty after build/test.\n" +
+          "Commit intentional generated changes or make generation deterministic.\n\n" +
+          "git status --porcelain=v1 --untracked-files=all:\n$status",
       )
     }
   }
@@ -86,70 +84,83 @@ tasks.register("verifyNoWorkingTreeChanges") {
 
 tasks.register("verifyReleaseTag") {
   group = "verification"
-  description = "On GitHub Actions tag builds, ensures tag name matches project.version and forbids SNAPSHOT."
+  description = "Validates release tag, version, and changelog discipline."
 
   doLast {
     val refType = System.getenv("GITHUB_REF_TYPE")?.trim()?.lowercase()
     val tag = System.getenv("GITHUB_REF_NAME")?.trim()
 
-    if (refType == "tag") {
-      if (tag.isNullOrBlank()) error("GITHUB_REF_TYPE=tag but GITHUB_REF_NAME is missing")
+    if (refType != "tag") {
+      return@doLast
+    }
 
-      val expected = "v${project.version}"
-      if (tag != expected) {
-        error(
-          "Release tag/version mismatch.\n" +
-                  "Tag:      $tag\n" +
-                  "Expected: $expected\n\n" +
-                  "Fix: bump project.version in build.gradle.kts or retag with the correct version."
-        )
-      }
+    if (tag.isNullOrBlank()) {
+      error("GITHUB_REF_TYPE=tag but GITHUB_REF_NAME is missing")
+    }
 
-      if (project.version.toString().contains("SNAPSHOT", ignoreCase = true)) {
-        error("Release tags must not build SNAPSHOT versions. Current version: ${project.version}")
-      }
+    val releaseVersion = project.version.toString()
+    val expectedTag = "v$releaseVersion"
+
+    if (tag != expectedTag) {
+      error(
+        "Release tag/version mismatch.\n" +
+          "Tag:      $tag\n" +
+          "Expected: $expectedTag\n\n" +
+          "Bump project.version or use the matching release tag.",
+      )
+    }
+
+    if (releaseVersion.contains("SNAPSHOT", ignoreCase = true)) {
+      error("Release tags must not build SNAPSHOT versions. Current version: $releaseVersion")
+    }
+
+    val changelog = rootProject.file("CHANGELOG.md")
+    if (!changelog.isFile) {
+      error("Missing CHANGELOG.md")
+    }
+
+    val heading = Regex("(?m)^##\\s+\\[${Regex.escape(releaseVersion)}\\]\\s*$")
+    if (!heading.containsMatchIn(changelog.readText(Charsets.UTF_8))) {
+      error("CHANGELOG.md must contain an exact '## [$releaseVersion]' release section.")
     }
   }
 }
 
-// Aggregate spotless across all subprojects (root has no Spotless tasks).
 tasks.register("spotlessCheckAll") {
   group = "verification"
   description = "Runs Spotless checks for all subprojects."
+  dependsOn(subprojects.map { "${it.path}:spotlessCheck" })
 }
 
-// Aggregate unit + integration checks across all subprojects (root has no check task).
 tasks.register("checkAll") {
   group = "verification"
-  description = "Runs unit + integration tests for all subprojects."
+  description = "Runs unit and integration checks for all subprojects."
+  dependsOn(subprojects.map { "${it.path}:check" })
 }
 
-/**
- * Gradle 8.13+ correctness:
- * Do NOT call gradle.projectsEvaluated { ... } from inside task configuration blocks.
- */
-gradle.projectsEvaluated {
-  tasks.named("spotlessCheckAll").configure {
-    val targets = subprojects.mapNotNull { sp -> sp.tasks.findByName("spotlessCheck")?.path }
-    if (targets.isEmpty()) error("No spotlessCheck tasks found in subprojects.")
-    dependsOn(targets)
-  }
-
-  tasks.named("checkAll").configure {
-    val targets = subprojects.mapNotNull { sp -> sp.tasks.findByName("check")?.path }
-    if (targets.isEmpty()) error("No check tasks found in subprojects.")
-    dependsOn(targets)
-  }
+tasks.register("assembleAll") {
+  group = "build"
+  description = "Assembles all production artifacts."
+  dependsOn(subprojects.map { "${it.path}:assemble" })
 }
 
-// Main CI aggregator.
+tasks.named("verifyNoWorkingTreeChanges").configure {
+  mustRunAfter(
+    ":spotlessCheckAll",
+    ":checkAll",
+    ":assembleAll",
+    ":enkidu-intellij-plugin:pluginVerification",
+  )
+}
+
 tasks.register("ci") {
   group = "verification"
-  description = "Runs all CI gates (formatting, tests, plugin verification, determinism guard)."
+  description = "Runs formatting, tests, packaging, plugin verification, and determinism gates."
 
   dependsOn(
     ":spotlessCheckAll",
     ":checkAll",
+    ":assembleAll",
     ":enkidu-intellij-plugin:pluginVerification",
     ":verifyNoWorkingTreeChanges",
   )
