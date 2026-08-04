@@ -198,29 +198,32 @@ object ReproBundleWriter {
             .mapIndexed { idx, p ->
                 val absolute = p.toAbsolutePath().normalize()
                 when {
-                    Files.isRegularFile(absolute) ->
+                    Files.isRegularFile(absolute) -> {
                         DoctorReproBundle.EntryFingerprint(
                             index = idx,
                             path = absolute.toString().replace(Char(92), '/'),
                             kind = "file",
                             sha256 = sha256OfFile(absolute),
                         )
+                    }
 
-                    Files.isDirectory(absolute) ->
+                    Files.isDirectory(absolute) -> {
                         DoctorReproBundle.EntryFingerprint(
                             index = idx,
                             path = absolute.toString().replace(Char(92), '/'),
                             kind = "dir",
                             sha256 = sha256OfDirectoryTree(absolute),
                         )
+                    }
 
-                    else ->
+                    else -> {
                         DoctorReproBundle.EntryFingerprint(
                             index = idx,
                             path = absolute.toString().replace(Char(92), '/'),
                             kind = "missing",
                             sha256 = "",
                         )
+                    }
                 }
             }
 

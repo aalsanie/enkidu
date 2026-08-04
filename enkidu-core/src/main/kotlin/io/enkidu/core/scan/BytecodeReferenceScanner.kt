@@ -151,7 +151,10 @@ public class BytecodeReferenceScanner {
             // Class literals compile to LDC Type.
             if (value is Type) {
                 when (value.sort) {
-                    Type.OBJECT -> recordTypeRef(opcode = Opcodes.LDC, internalName = value.internalName)
+                    Type.OBJECT -> {
+                        recordTypeRef(opcode = Opcodes.LDC, internalName = value.internalName)
+                    }
+
                     Type.ARRAY -> {
                         val element = value.elementType
                         if (element.sort == Type.OBJECT) {

@@ -208,19 +208,21 @@ class JvmLinkageResolver(
                 )
             }
 
-            is LookupOutcome.Missing ->
+            is LookupOutcome.Missing -> {
                 FieldResolutionOutcome.MissingField(
                     symbolOwner = owner,
                     signature = signature,
                     sameNameOtherDescriptors = lookup.sameNameOtherDescriptors,
                 )
+            }
 
-            is LookupOutcome.Incompatible ->
+            is LookupOutcome.Incompatible -> {
                 FieldResolutionOutcome.IncompatibleClassChange(
                     symbolOwner = owner,
                     signature = signature,
                     message = lookup.message,
                 )
+            }
         }
     }
 
