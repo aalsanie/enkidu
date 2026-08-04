@@ -126,7 +126,10 @@ class JarIndex private constructor(
             // Commit both directory and jar classes STRICTLY in classpath order.
             snapshot.entries.forEachIndexed { idx, entry ->
                 when (entry) {
-                    is ClasspathEntry.Directory -> indexDirectory(entry.path, idx, map)
+                    is ClasspathEntry.Directory -> {
+                        indexDirectory(entry.path, idx, map)
+                    }
+
                     is ClasspathEntry.Jar -> {
                         val classes = jarResults[idx].orEmpty()
                         for (clazz in classes) {

@@ -3,7 +3,7 @@ import org.gradle.api.tasks.bundling.AbstractArchiveTask
 
 plugins {
   kotlin("jvm") version "2.4.10" apply false
-  id("com.diffplug.spotless") version "8.1.0" apply false
+  id("com.diffplug.spotless") version "8.9.0" apply false
 }
 
 allprojects {

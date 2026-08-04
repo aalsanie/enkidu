@@ -69,13 +69,15 @@ class LinkageFailureClassifier(
     ): LinkageFailure? {
         val outcome = resolver.resolveClass(reference.symbol.owner)
         return when (outcome) {
-            is ClassResolutionOutcome.Resolved -> null
+            is ClassResolutionOutcome.Resolved -> {
+                null
+            }
 
             is ClassResolutionOutcome.Unparseable -> {
                 null
             }
 
-            is ClassResolutionOutcome.Missing ->
+            is ClassResolutionOutcome.Missing -> {
                 buildFailure(
                     type = FailureType.MISSING_CLASS,
                     severity = Severity.ERROR,
@@ -85,6 +87,7 @@ class LinkageFailureClassifier(
                     evidence = evidenceForOwner(outcome.binaryName),
                     callGraph = callGraph,
                 )
+            }
         }
     }
 
@@ -123,7 +126,8 @@ class LinkageFailureClassifier(
                     )
                 }
             }
-            is MethodResolutionOutcome.MissingClass ->
+
+            is MethodResolutionOutcome.MissingClass -> {
                 buildFailure(
                     type = FailureType.MISSING_CLASS,
                     severity = Severity.ERROR,
@@ -133,6 +137,7 @@ class LinkageFailureClassifier(
                     evidence = evidenceForOwner(outcome.symbolOwner),
                     callGraph = callGraph,
                 )
+            }
 
             is MethodResolutionOutcome.MissingMethod -> {
                 val (t, msg) =
@@ -154,7 +159,7 @@ class LinkageFailureClassifier(
                 )
             }
 
-            is MethodResolutionOutcome.IncompatibleClassChange ->
+            is MethodResolutionOutcome.IncompatibleClassChange -> {
                 buildFailure(
                     type = FailureType.INCOMPATIBLE_CLASS_CHANGE,
                     severity = Severity.ERROR,
@@ -167,6 +172,7 @@ class LinkageFailureClassifier(
                     evidence = evidenceForOwner(outcome.symbolOwner),
                     callGraph = callGraph,
                 )
+            }
         }
     }
 
@@ -199,7 +205,8 @@ class LinkageFailureClassifier(
                     )
                 }
             }
-            is FieldResolutionOutcome.MissingClass ->
+
+            is FieldResolutionOutcome.MissingClass -> {
                 buildFailure(
                     type = FailureType.MISSING_CLASS,
                     severity = Severity.ERROR,
@@ -209,6 +216,7 @@ class LinkageFailureClassifier(
                     evidence = evidenceForOwner(outcome.symbolOwner),
                     callGraph = callGraph,
                 )
+            }
 
             is FieldResolutionOutcome.MissingField -> {
                 val (t, msg) =
@@ -230,7 +238,7 @@ class LinkageFailureClassifier(
                 )
             }
 
-            is FieldResolutionOutcome.IncompatibleClassChange ->
+            is FieldResolutionOutcome.IncompatibleClassChange -> {
                 buildFailure(
                     type = FailureType.INCOMPATIBLE_CLASS_CHANGE,
                     severity = Severity.ERROR,
@@ -243,6 +251,7 @@ class LinkageFailureClassifier(
                     evidence = evidenceForOwner(outcome.symbolOwner),
                     callGraph = callGraph,
                 )
+            }
         }
     }
 
