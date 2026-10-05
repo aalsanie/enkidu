@@ -41,6 +41,7 @@ jobs:
           verify-signature: true
 
       - name: Generate and submit dependency graph
+        # Keep the action pinned to a full commit SHA for reproducible workflow execution.
         uses: gradle/actions/dependency-submission@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-provider: basic
