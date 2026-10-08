@@ -2,7 +2,7 @@ import com.diffplug.gradle.spotless.SpotlessExtension
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 
 plugins {
-  kotlin("jvm") version "2.4.10" apply false
+  kotlin("jvm") version "2.4.20" apply false
   id("com.diffplug.spotless") version "8.9.0" apply false
 }
 
