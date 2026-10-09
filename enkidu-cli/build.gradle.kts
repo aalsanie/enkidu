@@ -15,7 +15,7 @@ dependencies {
     implementation(project(":enkidu-core"))
     implementation(project(":enkidu-export"))
 
-    implementation("info.picocli:picocli:4.7.6")
+    implementation("info.picocli:picocli:4.7.7")
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
